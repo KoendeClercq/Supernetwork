@@ -1,0 +1,23 @@
+[
+    {
+        "id": 0,
+        "origin": 2624,
+        "destination": 2622,
+        "type": 3,
+        "depTime": 289
+    },
+    {
+        "id": 1,
+        "origin": 3000,
+        "destination": 2611,
+        "type": 3,
+        "depTime": 233
+    },
+    {
+        "id": 2,
+        "origin": 1001,
+        "destination": 1003,
+        "type": 1,
+        "depTime": 270
+    }
+]
