@@ -162,22 +162,17 @@ def calcResistance(numberOfAgentsOnLink, distance, capacity, ffSpeed, mode, sour
         [-0.196, -0.03036, 0, 0.694, -2.69, -0,959, -0.384, 1.75, -1.65, 1.91, 1.39, 0.848], # 4
         [-0.15, -0.03768, 0, -0.136, 1.29, -0.125, 0.458, -1.16, -2.61, 0.314, 0.455, -1.24]] # 5
 
-    # BPR-function, based on OmniTRANS Delft model BPR function fitting, see BPR_calibration_all_links.xlsx
+    # Fundamental diagram, nr of lanes for Delft model based on OmniTRANS Delft model BPR function fitting, see BPR_calibration_all_links.xlsx
     if (distance != 0) and (len(source) > 2):
         
         if 'TestDCM' in networkName:
             # Only used to compare model with DCM
             speed = ffSpeed
         else:
-            alpha = 0.87 # [-]
-            beta = 4 # [-]
-            currentDensity = numberOfAgentsOnLink / distance # [veh/km]
-            flow = currentDensity * scalingSampleSize # [veh/hr] including scaling factor to aggregate agents
-            timeFreeFlow = distance / ffSpeed # [hr]
-            timeOnLink = timeFreeFlow * (1 + alpha * (flow / capacity) ** beta)
-            speed = max(distance / timeOnLink, 0.1) # [km/hr] - Minimum speed of 0.1 km/hr for computational reasons (otherwise agents might stay in (congested) network forever)
-    
-    # speed = ffSpeed
+            k_jam = 150 # [veh/km] Assumed maximum density per lane
+            density = numberOfAgentsOnLink / distance # [veh/km]
+            speed = max(0.1, ffSpeed - (ffSpeed / (k_jam * capacity)) * density) # [km/hr] - Minimum speed of 0.1 km/hr for computational reasons (otherwise agents might stay in (congested) network forever)
+
     speed = max(5, speed)
 
 
