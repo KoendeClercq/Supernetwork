@@ -3271,11 +3271,12 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
                 nrOfAgents = 0
 
             capacity = row['capacity']
-            try:
-                dfBPRRow = dfBPR.loc[(dfBPR['PythonO'].astype('str') == row['source'][-4:]) & (dfBPR['PythonD'].astype('str') == row['target'][-4:])]
-                capacity = float(dfBPRRow['Cfill']) # [veh/hour]
-            except: # When moving between layers, no need for determining capacity
-                pass
+            if 'Delft' in networkName:
+                try:
+                    dfBPRRow = dfBPR.loc[(dfBPR['PythonO'].astype('str') == row['source'][-4:]) & (dfBPR['PythonD'].astype('str') == row['target'][-4:])]
+                    capacity = float(dfBPRRow['Cfill']) # [veh/hour]
+                except: # When moving between layers, no need for determining capacity
+                    pass
 
 
             # Look-up congestion on link
@@ -3329,7 +3330,7 @@ def plotNetwork(time, maxCapacity):
     ############################ Plot network ################################
 
     # Load json networkx datafile
-    with open('simpleNetwork.json','r') as infile:
+    with open('data/simpleNetwork.json','r') as infile:
         G = nx.json_graph.node_link_graph(json.load(infile))
     pos = nx.get_node_attributes(G, 'pos')
     print(G)
@@ -3350,7 +3351,7 @@ def plotNetwork(time, maxCapacity):
     # nx.draw_networkx_edge_labels(G, pos, font_size=6, edge_labels={('0', '8'): 'Future',('8', '15'): 'Future',('15', '22'): 'Future',('22', '1'): 'Future'}, font_color='black')
 
     # plt.savefig('figures/simpleNetwork.png', dpi=300)
-    plt.savefig('figures/DelftNetwork.png', dpi=300)
+    plt.savefig('data/figures/DelftNetwork.png', dpi=300)
 
 
 
@@ -3389,7 +3390,7 @@ def plotNetwork(time, maxCapacity):
 
         for i in time:
 
-            with open('linksTimeStep' + str(i) + '.json','r') as infile:
+            with open('data/linksTimeStep' + str(i) + '.json','r') as infile:
                 G = nx.json_graph.node_link_graph(json.load(infile))
             pos = nx.get_node_attributes(G, 'pos')
 
@@ -3414,12 +3415,12 @@ def plotNetwork(time, maxCapacity):
             # Plot the network
             fig = plt.figure()
             nx.draw_networkx_edges(G, pos, edge_color=weights, connectionstyle="arc3,rad=0.1", edge_cmap=plt.cm.RdYlGn, edge_vmin=0, edge_vmax=1, node_size=0, width=speedEdge)
-            plt.savefig('figures/timestep/CapNetworkWithAgents' + j + '_' + str(i) + '.png', dpi=300)
+            plt.savefig('data/figures/timestep/CapNetworkWithAgents' + j + '_' + str(i) + '.png', dpi=300)
             plt.close(fig)
 
             fig = plt.figure()
             nx.draw_networkx_edges(G, pos, edge_color=speedEdge, connectionstyle="arc3,rad=0.1", edge_cmap=plt.cm.RdYlGn, edge_vmin=0, edge_vmax=1, node_size=0, width=weights*7)
-            plt.savefig('figures/timestep/SpeedNetworkWithAgents' + j + '_' + str(i) + '.png', dpi=300)
+            plt.savefig('data/figures/timestep/SpeedNetworkWithAgents' + j + '_' + str(i) + '.png', dpi=300)
             plt.close(fig)
 
 
@@ -3428,16 +3429,16 @@ def plotNetwork(time, maxCapacity):
             print('checkSpeed', checkSpeed)
 
         # Create gif from plots
-        with iio.get_writer('figures/CapNetworkAgents' + j + '.gif', duration=0.05) as writer:
+        with iio.get_writer('data/figures/CapNetworkAgents' + j + '.gif', duration=0.05) as writer:
             for i in time:
-                file = 'figures/timestep/CapNetworkWithAgents' + j + '_' + str(i) + '.png'
+                file = 'data/figures/timestep/CapNetworkWithAgents' + j + '_' + str(i) + '.png'
                 image = iio.imread(file)
                 writer.append_data(image)
                 print("Plotting animation timestep", i, "/", len(time), "completed")
 
-        with iio.get_writer('figures/SpeedNetworkAgents' + j + '.gif', duration=0.05) as writer:
+        with iio.get_writer('data/figures/SpeedNetworkAgents' + j + '.gif', duration=0.05) as writer:
             for i in time:
-                file = 'figures/timestep/SpeedNetworkWithAgents' + j + '_' + str(i) + '.png'
+                file = 'data/figures/timestep/SpeedNetworkWithAgents' + j + '_' + str(i) + '.png'
                 image = iio.imread(file)
                 writer.append_data(image)
                 print("Plotting animation timestep", i, "/", len(time), "completed")
@@ -3704,11 +3705,13 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
         'modalSplitMixedCar', 'modalSplitMixedCarpool', 'modalSplitMixedTransit', 'modalSplitMixedBicycle', 'modalSplitMixedWalk', 'modalSplitMixedFuture',
         'averageDuration', 'staDevDuration', 'medianDuration', 'averageSpeed', 'staDevSpeed', 'medianSpeed', 'totalDistanceTravelled', 'totalObservedUtility', 'nrOfTrips',
         'modalSplitCarKm', 'modalSplitCarpoolKm', 'modalSplitTransitKm', 'modalSplitBicycleKm', 'modalSplitWalkKm', 'modalSplitFutureKm', 'modalSplitMixedKm', 
-        'modalSplitMixedCarKm', 'modalSplitMixedCarpoolKm', 'modalSplitMixedTransitKm', 'modalSplitMixedBicycleKm', 'modalSplitMixedWalkKm', 'modalSplitMixedFutureKm',]
+        'modalSplitMixedCarKm', 'modalSplitMixedCarpoolKm', 'modalSplitMixedTransitKm', 'modalSplitMixedBicycleKm', 'modalSplitMixedWalkKm', 'modalSplitMixedFutureKm','averageDistance']
     if runIteration == 0:
         with open('data/resultsSummary.csv', 'w', encoding='UTF8') as f:
             writer = csv.writer(f)
             writer.writerow(header)
+
+    factorDistanceCalc = np.sum(totalDistanceTravelled) * scalingSampleSizeTrips * 100
 
     with open('data/resultsSummary.csv', 'a', encoding='UTF8') as f:
         writer = csv.writer(f)
@@ -3716,23 +3719,26 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
         date_time = now.strftime("%m%d%Y_%H:%M:%S_%f")[:-3]
 
         data = [date_time, networkName, nameFuture, futureCharRow[0], futureCharRow[1], futureCharRow[2], futureCharRow[3], futureCharRow[4], futureCharRow[5], futureCharRow[6], futureCharRow[7], futureCharRow[8], futureCharRow[9], futureCharRow[10], futureCharRow[11], futureCharRow[12], scalingSampleSize, futureCharRow[13], 
-            (tripsModeChoice == 1).sum()/len(tripsModeChoice), 
-            (tripsModeChoice == 2).sum()/len(tripsModeChoice), 
-            (tripsModeChoice == 3).sum()/len(tripsModeChoice), 
-            (tripsModeChoice == 4).sum()/len(tripsModeChoice), 
-            (tripsModeChoice == 5).sum()/len(tripsModeChoice), 
-            (tripsModeChoice == 6).sum()/len(tripsModeChoice), 
-            (tripsModeChoice == 7).sum()/len(tripsModeChoice), 
-            (tripsModeChoiceMixed == 1).sum()/(tripsModeChoice == 7).sum(), 
-            (tripsModeChoiceMixed == 2).sum()/(tripsModeChoice == 7).sum(), 
-            (tripsModeChoiceMixed == 3).sum()/(tripsModeChoice == 7).sum(), 
-            (tripsModeChoiceMixed == 4).sum()/(tripsModeChoice == 7).sum(), 
-            (tripsModeChoiceMixed == 5).sum()/(tripsModeChoice == 7).sum(), 
-            (tripsModeChoiceMixed == 6).sum()/(tripsModeChoice == 7).sum(), 
-            np.average(duration), np.std(duration), np.median(duration),
+            (tripsModeChoice == 1).sum()/len(tripsModeChoice)*100, 
+            (tripsModeChoice == 2).sum()/len(tripsModeChoice)*100, 
+            (tripsModeChoice == 3).sum()/len(tripsModeChoice)*100, 
+            (tripsModeChoice == 4).sum()/len(tripsModeChoice)*100, 
+            (tripsModeChoice == 5).sum()/len(tripsModeChoice)*100, 
+            (tripsModeChoice == 6).sum()/len(tripsModeChoice)*100, 
+            (tripsModeChoice == 7).sum()/len(tripsModeChoice)*100, 
+            (tripsModeChoiceMixed == 1).sum()/(tripsModeChoice == 7).sum()*100, 
+            (tripsModeChoiceMixed == 2).sum()/(tripsModeChoice == 7).sum()*100, 
+            (tripsModeChoiceMixed == 3).sum()/(tripsModeChoice == 7).sum()*100, 
+            (tripsModeChoiceMixed == 4).sum()/(tripsModeChoice == 7).sum()*100, 
+            (tripsModeChoiceMixed == 5).sum()/(tripsModeChoice == 7).sum()*100, 
+            (tripsModeChoiceMixed == 6).sum()/(tripsModeChoice == 7).sum()*100, 
+            np.average(duration)*60, np.std(duration)*60, np.median(duration)*60,
             np.average(speedTrips), np.std(speedTrips), np.median(speedTrips), 
             np.sum(totalDistanceTravelled) * scalingSampleSizeTrips, totalUtility, len(tripsModeChoice),
-            distancesTrips[0], distancesTrips[1], distancesTrips[2], distancesTrips[3], distancesTrips[4], distancesTrips[5], distancesTrips[6], distancesTrips[7], distancesTrips[8], distancesTrips[9], distancesTrips[10], distancesTrips[11], distancesTrips[12]]
+            distancesTrips[0] / factorDistanceCalc, distancesTrips[1] / factorDistanceCalc, distancesTrips[2] / factorDistanceCalc, distancesTrips[3] / factorDistanceCalc, 
+            distancesTrips[4] / factorDistanceCalc, distancesTrips[5] / factorDistanceCalc, distancesTrips[6] / factorDistanceCalc, distancesTrips[7] / factorDistanceCalc, 
+            distancesTrips[8] / factorDistanceCalc, distancesTrips[9] / factorDistanceCalc, distancesTrips[10] / factorDistanceCalc, distancesTrips[11] / factorDistanceCalc, distancesTrips[12], 
+            np.sum(totalDistanceTravelled) * scalingSampleSizeTrips / len(tripsModeChoice)]
         writer.writerow(data)
         f.close()
 
