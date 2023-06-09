@@ -153,7 +153,7 @@ def nextNode(G, prevPrevSource, prevSource, recSource, recTarget, cluster, netwo
     return pathsList[chosenRoute][1][1]
 
 # Resistance (reversed utility) function
-def calcResistance(numberOfAgentsOnLink, distance, capacity, ffSpeed, mode, source, target, currentSpeed, t, timeStep, scalingSampleSize, futureCharRow, networkName):
+def calcResistance(numberOfAgentsOnLink, distance, lanes, ffSpeed, mode, source, target, currentSpeed, t, timeStep, scalingSampleSize, futureCharRow, networkName):
 
     # Betas per cluster from DCM
     Betas = [[-1.53, -0.156, 0, -0.25, -0.0606, 0.107, 0.193, -0.137, 0.205, 0.186, 0.293, 0.213], # 0
@@ -170,21 +170,20 @@ def calcResistance(numberOfAgentsOnLink, distance, capacity, ffSpeed, mode, sour
             # Only used to compare model with DCM
             speed = ffSpeed
         else:
-            k_jam = 150 # [veh/km] Assumed maximum density per lane
-            density = numberOfAgentsOnLink / distance # [veh/km]
-            speed = max(0.1, ffSpeed - (ffSpeed / (k_jam * capacity)) * density) # [km/hr] - Minimum speed of 0.1 km/hr for computational reasons (otherwise agents might stay in (congested) network forever)
-
             # Fundamental diagram
-            critDensity = 25 # [km/hr]
+            critDensity = 25 # [veh/km] Assumed critical density per lane
             jamDensity = 150 # [veh/km] Assumed maximum density per lane
-            laneCapacity = 2500 # [veh/hr]
-
-            density = numberOfAgentsOnLink / distance # [veh/km]
+            laneCapacity = critDensity * ffSpeed # [veh/hr]
+            
+            if 'Delft' in networkName: # In Delft case lanes == capacity in the input in this function, so below actually reads: capacity / laneCapacity --> lanes
+                lanes = lanes / laneCapacity # [-]
+            
+            density = numberOfAgentsOnLink / distance / lanes # [veh/km] - Normalized to 1 lane
 
             if density <= critDensity:
-                speed = ffSpeed
+                speed = ffSpeed # [km/hr]
             else:
-                speed = max((jamDensity - density) * (laneCapacity / (jamDensity - critDensity)) / density, 0.1)
+                speed = max((jamDensity - density) * (laneCapacity / (jamDensity - critDensity)) / density, 0.1) # [km/hr] - Minimum speed of 0.1 km/hr for computational reasons (otherwise agents might stay in (congested) network forever)
 
     # speed = max(5, speed)
 
@@ -1172,25 +1171,22 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
                         # One-way
                         data = [layerNumber[j]+k, 'link', 0, 0, layerNumber[j]+zonesFrom[k], layerNumber[j]+zonesTo[k], resistance[j], lanes[k], distance[k], speed[j], defSpeed[j], mode[j]]
                         writer.writerow(data)
-                        # Other-way (backwards, demo networks have only 1 direction: forward)
-                        # data = [layerNumber[j]+k+5000, 'link', 0, 0, layerNumber[j]+zonesTo[k], layerNumber[j]+zonesFrom[k], resistance[j], lanes[k], distance[k], speed[j], defSpeed[j], mode[j]]
-                        # writer.writerow(data)
 
                     if 'Multimodal' in networkName:
                         for i in zones:
                             # One-way
-                            data = [layerNumber[j]+i, 'link', 0, 0, layerNumber[j]+i, neutralLayerFactor+i, resistance[j], lanes[k], distanceNeutralToMode[j], speed[j], defSpeed[j], mode[j] + 'ToNeutral']
+                            data = [layerNumber[j]+i, 'link', 0, 0, layerNumber[j]+i, neutralLayerFactor+i, resistance[j], lanes[i], distanceNeutralToMode[j], speed[j], defSpeed[j], mode[j] + 'ToNeutral']
                             writer.writerow(data)
                             # Other-way
-                            data = [layerNumber[j]+i+5000, 'link', 0, 0, neutralLayerFactor+i, layerNumber[j]+i, resistance[j], lanes[k], distanceNeutralToMode[j], speed[j], defSpeed[j], 'NeutralTo' + mode[j]]
+                            data = [layerNumber[j]+i+5000, 'link', 0, 0, neutralLayerFactor+i, layerNumber[j]+i, resistance[j], lanes[i], distanceNeutralToMode[j], speed[j], defSpeed[j], 'NeutralTo' + mode[j]]
                             writer.writerow(data)
                     else:
                         for i in zonesOD:
                             # One-way
-                            data = [layerNumber[j]+i, 'link', 0, 0, layerNumber[j]+i, 0+i, resistanceToNeutral[j], lanes[k], distanceNeutralToMode[j], speed[j], defSpeed[j], mode[j] + 'ToNeutral']
+                            data = [layerNumber[j]+i, 'link', 0, 0, layerNumber[j]+i, 0+i, resistanceToNeutral[j], lanes[i], distanceNeutralToMode[j], speed[j], defSpeed[j], mode[j] + 'ToNeutral']
                             writer.writerow(data)
                             # Other-way
-                            data = [layerNumber[j]+i+5000, 'link', 0, 0, 0+i, layerNumber[j]+i, neutralToResistance[j], lanes[k], distanceNeutralToMode[j], speed[j], defSpeed[j], 'NeutralTo' + mode[j]]
+                            data = [layerNumber[j]+i+5000, 'link', 0, 0, 0+i, layerNumber[j]+i, neutralToResistance[j], lanes[i], distanceNeutralToMode[j], speed[j], defSpeed[j], 'NeutralTo' + mode[j]]
                             writer.writerow(data)
 
                 if 'Multimodal' in networkName:
@@ -1369,31 +1365,9 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
                 layerNumber = [30000, 40000, 50000, 60000, 70000, 80000]
                 locations = [zones, zones, zones, zones, zones, zones]
                 
-
-                # zonesFrom = [2626, 2626, 2622, 2622, 2625, 2625, 2625, 1004, 1004, 1003, 1003, 1002, 1002, 1001, 1001, 2616, 2616, 1007, 1007, 1006, 1006, 1006, 1005, 2629, 2629, 2629, 2629, 2623, 2623, 2624, 2624, 4005, 4005, 4005, 2614, 2614, 2614, 4000, 4000, 4001, 4001, 4001, 2611, 2611, 2611, 2611, 2612, 2612, 2628, 2628, 4004, 4004, 4004, 3000, 3000, 2627, 2627]
-                # zonesTo = [2623, 2622, 2623, 2625, 2624, 4006, 1004, 4006, 1003, 4000, 1002, 2613, 1001, 4002, 2616, 2612, 1007, 4003, 1006, 2628, 2629, 1005, 2629, 2628, 4008, 2627, 2623, 2627, 2624, 4007, 4005, 4006, 2613, 3000, 4006, 4000, 2613, 4001, 2613, 4002, 2611, 2613, 4002, 4003, 4004, 3000, 4002, 4003, 4003, 4008, 4003, 4008, 3000, 2613, 4007, 4007, 4008]
-                # # For transit layer (fewer connections)
-                # zonesFromTransit = [1002, 4000, 4000, 4000, 4001, 4001, 4001, 4002, 4002, 2611, 2611, 2611, 4003, 4003, 4004, 4004, 2628, 2628, 1006, 4008, 2629, 2623, 2623, 2623, 2622, 2625, 2625, 4006, 4006, 4005, 4005, 4005, 2614, 2613, 3000, 4007, 4007]
-                # zonesToTransit = [4000, 4001, 2613, 2614, 4002, 2611, 2613, 1001, 2611, 4003, 4004, 3000, 2628, 4004, 4008, 3000, 1006, 4008, 1005, 2629, 2623, 2627, 2624, 2622, 2625, 2624, 4006, 4005, 2614, 2613, 3000, 2624, 2613, 3000, 4007, 2624, 2627]
-
-                # distance = [43, 38, 35, 43, 27, 14, 45, 39, 55, 49, 47, 49, 46, 48, 63, 43, 73, 61, 34, 31, 55, 96, 51, 49, 50, 38, 42, 31, 42, 9, 18, 27, 23, 18, 25, 24, 22, 22, 24, 17, 18, 18, 25, 22, 19, 20, 15, 34, 31, 8, 13, 24, 19, 15, 31, 16, 27]
-                # distance = [i/24*1 for i in distance]  # Scaling: distance = distance / 24, assumed 50% extra length due to aggregation links and 'hemelsbrede afstand', based on distances in OmniTRANS when selection OD-pairs.
-
-                # distanceTransit = distance
-                
                 zonesFrom = [1001,    1001,    1002,    1002,    1003,    1003,    1004,    1004,    1005,    1006,    1006,    1006,    1007,    1007,    2611,    2611,    2611,    2611,    2612,    2612,    2614,    2614,    2614,    2616,    2616,    2622,    2622,    2623,    2623,    2624,    2624,    2625,    2625,    2625,    2626,    2626,    2627,    2627,    2628,    2628,    2629,    2629,    2629,    2629,    3000,    3000,    4000,    4000,    4001,    4001,    4001,    4004,    4004,    4004,    4005,    4005,    4005]
                 zonesTo   = [4002,    2616,    2613,    1001,    4000,    1002,    4006,    1003,    2629,    2628,    2629,    1005,    4003,    1006,    4002,    4003,    4004,    3000,    4002,    4003,    4006,    4000,    2613,    2612,    1007,    2623,    2625,    2627,    2624,    4007,    4005,    2624,    4006,    1004,    2623,    2622,    4007,    4008,    4003,    4008,    2628,    4008,    2627,    2623,    2613,    4007,    4001,    2613,    4002,    2611,    2613,    4003,    4008,    3000,    4006,    2613,    3000]
                 distance  = [2.04,    2.04,    4.28,    2.35,    5.54,    2.82,    3.81,    4.20,    6.24,    3.61,    3.61,    3.61,    3.61,    3.61,    2.33,    0.93,    0.93,    0.93,    1.36,    2.33,    2.47,    1.38,    1.52,    3.61,    2.04,    2.62,    2.37,    4.15,    2.80,    2.64,    2.19,    2.19,    2.47,    4.67,    5.57,    3.15,    2.64,    2.95,    2.54,    2.54,    1.99,    6.24,    4.52,    4.52,    0.93,    2.64,    1.52,    1.68,    1.36,    0.93,    1.68,    2.54,    2.54,    1.52,    1.38,    1.68,    1.52]
-
-                # # For transit layer (fewer connections)                                                                                                                                                                                                                    
-                # zonesFromTransit = [1002,    1006,    2611,    2611,    2611,    2613,    2614,    2622,    2623,    2623,    2623,    2625,    2625,    2628,    2628,    2629,    3000,    4000,    4000,    4000,    4001,    4001,    4001,    4002,    4002,    4003,    4003,    4004,    4004,    4005,    4005,    4005,    4006,    4006,    4007,    4007,    4008]                                                                                
-                # zonesToTransit   = [4000,    1005,    3000,    4003,    4004,    3000,    2613,    2625,    2622,    2624,    2627,    2624,    4006,    1006,    4008,    2623,    4007,    2613,    2614,    4001,    2611,    2613,    4002,    1001,    2611,    2628,    4004,    3000,    4008,    2613,    2624,    3000,    2614,    4005,    2624,    2627,    2629]                                                                               
-                # distanceTransit  = [5.54,    3.61,    0.93,    2.33,    0.93,    0.93,    1.52,    2.37,    2.62,    2.80,    4.15,    2.19,    2.47,    3.61,    2.54,    4.52,    2.64,    1.68,    1.38,    1.52,    0.93,    1.68,    1.36,    2.04,    2.33,    2.54,    2.54,    1.52,    2.54,    1.68,    2.19,    1.52,    2.47,    1.38,    2.64,    2.64,    6.24]                                                                                
-
-                # For carpool layer (fewer connection and only to Delft station (3000))
-                # zonesFromCarpool = [1001,    1002,    1003,    1004,    1006,    1007,    2611,    2612,    2613,    2614,    2616,    2622,    2623,    2624,    2625,    2626,    2627,    2628,    2629,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000]
-                # zonesToCarpool   = [3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    1001,    1002,    1003,    1004,    1006,    1007,    2611,    2612,    2613,    2614,    2616,    2622,    2623,    2624,    2625,    2626,    2627,    2628,    2629]
-                # distanceCarpool  = [3.5,     3.6,     5.6,     4.1,     4.6,     5.2,     2.2,     2.2,     1.5,     2.9,     4.7,     4.6,     3.7,     2.6,     3.2,     6.4,     2.5,     3.6,     4.9,     3.5,     3.6,     5.6,     4.1,     4.6,     5.2,     2.2,     2.2,     1.5,     2.9,     4.7,     4.6,     3.7,     2.6,     3.2,     6.4,     2.5,     3.6,     4.9]
 
                 resistance = [6, 6, 6, 6, 6, 6]
                 resistanceToNeutral = [1, 1, 1, 1, 1, 1]
@@ -3090,7 +3064,7 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
         G = nx.json_graph.node_link_graph(json.load(infile))
 
     # Load link capacities
-    # dfBPR = pd.read_csv('dataset/BPR_all_links.csv', sep=';', decimal=",")
+    dfBPR = pd.read_csv('dataset/BPR_all_links.csv', sep=';', decimal=",")
 
     for i in time:
         if i > 0:
