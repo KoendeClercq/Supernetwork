@@ -10,6 +10,7 @@ import os
 import time as timeOS
 from datetime import datetime
 import shutil
+import multiprocessing as mp
 import csv
 import pickle
 import ujson as json
@@ -87,7 +88,7 @@ def nextNode(G, prevPrevSource, prevSource, recSource, recTarget, cluster, netwo
             path, pathRes, pathLength = shortestPathUtilityCombined(G_temp, recSource, recTarget, cluster)
 
             # Check if path is multimodal
-            if ('Unimodal' in networkName) and (float(path[0]) > 25000) and (float(path[0]) < 100000) and (float(path[1]) < 100000): # Exception for transit implemented, since a switch to another mode is allowed here, if it does not cover the whole network
+            if ('Unimodal' in networkName) and (float(path[0]) > 25000):
                 indices = [i for i, x in enumerate(path) if float(x) < 25000] # Check if edges are moving 'back' to the OD-layer, representing shifts in mode (which is not allowed when using the unimodal network)
                 j = 0
                 while (len(indices) > 1) and (j < nrOfEdges): # Repeat until all multimodal options are removed.
@@ -99,14 +100,12 @@ def nextNode(G, prevPrevSource, prevSource, recSource, recTarget, cluster, netwo
             # Remove first link to create 'nest' in route-set
             G_temp.remove_edge(path[0], path[1])
             pathsList.append([pathRes, path, pathLength])
-            
         except:
             pass
 
     nrOfRoutes = len(pathsList)
     if nrOfRoutes == 0:
         print('Warning: 0 routes found, next node cannot be determined.')
-        print(prevPrevSource, prevSource, recSource, recTarget)
             
     # Calculate all PS factors for each of the 6 paths
     PS = [0, 0, 0, 0, 0, 0]
@@ -172,9 +171,6 @@ def calcResistance(numberOfAgentsOnLink, distance, capacity, ffSpeed, mode, sour
             k_jam = 150 # [veh/km] Assumed maximum density per lane
             density = numberOfAgentsOnLink / distance # [veh/km]
             speed = max(0.1, ffSpeed - (ffSpeed / (k_jam * capacity)) * density) # [km/hr] - Minimum speed of 0.1 km/hr for computational reasons (otherwise agents might stay in (congested) network forever)
-
-    speed = max(5, speed)
-
 
     # Default values
     cost = 0
@@ -292,7 +288,7 @@ def calcResistance(numberOfAgentsOnLink, distance, capacity, ffSpeed, mode, sour
         time = 2 / 60 * 3 # [hour]
 
     elif mode == 'TransitToNeutral':
-        time = 0.1 / 60 * 3 # [hour]
+        time = 5 / 60 * 3 # [hour]
 
     elif mode == 'BicycleToNeutral':
         time = 1 / 60 * 3 # [hour]
@@ -303,54 +299,6 @@ def calcResistance(numberOfAgentsOnLink, distance, capacity, ffSpeed, mode, sour
     elif mode == 'FutureToNeutral':
         time = futureCharRow[12] * 3 # [hour]
 
-    elif mode == 'TransitToTram001':
-        time = 5 / 60 * 3 # [hour] Freq. based - every 10 min
-
-    elif mode == 'TransitToTram019':
-        time = 10 / 60 * 3 # [hour] Freq. based - every 20 min
-
-    elif mode == 'TransitToBus455':
-        time = 7.5 / 60 * 3 # [hour] Freq. based - every 15 min
-
-    elif mode == 'TransitToBus040':
-        time = 15 / 60 * 3 # [hour] Freq. based - every 30 min
-
-    elif mode == 'TransitToBus060':
-        time = 7.5 / 60 * 3 # [hour] Freq. based - every 15 min
-
-    elif mode == 'TransitToBus061':
-        time = 15 / 60 * 3 # [hour] Freq. based - every 30 min
-
-    elif mode == 'TransitToBus062':
-        time = 15 / 60 * 3 # [hour] Freq. based - every 30 min
-
-    elif mode == 'TransitToBus063':
-        time = 15 / 60 * 3 # [hour] Freq. based - every 30 min
-
-    elif mode == 'TransitToBus064':
-        time = 7.5 / 60 * 3 # [hour] Freq. based - every 15 min
-
-    elif mode == 'TransitToBus069':
-        time = 7.5 / 60 * 3 # [hour] Freq. based - every 15 min
-
-    elif mode == 'TransitToBus174':
-        time = 15 / 60 * 3 # [hour] Freq. based - every 30 min
-
-    elif mode == 'TransitToBus033':
-        time = 15 / 60 * 3 # [hour] Freq. based - every 30 min
-
-    elif mode == 'TransitToBus037':
-        time = 15 / 60 * 3 # [hour] Freq. based - every 30 min
-
-    elif mode == 'TransitToBus053':
-        if t < 300:
-            time = 15 / 60 * 3 # [hour] Freq. based - every 30 min
-        else:
-            time = 999999999 # Not available after 9:00am
-
-    elif mode == 'TransitToTrain015':
-        time = 7.5 / 60 * 3 # [hour] Freq. based - every 30 min  
-
     elif mode == 'NeutralToCar':
         time = 2 / 60 * 3 # [hour]
 
@@ -358,7 +306,7 @@ def calcResistance(numberOfAgentsOnLink, distance, capacity, ffSpeed, mode, sour
         time = 10 / 60 * 3 # [hour]
 
     elif mode == 'NeutralToTransit':
-        time = 0.1 / 60 * 3 # [hour]
+        time = 7.5 / 60 * 3 # [hour] # t/timeStep % (30/60) * 3 # [hour] - frequency based every 15 minutes
 
     elif mode == 'NeutralToBicycle':
         time = 1 / 60 * 3 # [hour]
@@ -368,10 +316,6 @@ def calcResistance(numberOfAgentsOnLink, distance, capacity, ffSpeed, mode, sour
 
     elif mode == 'NeutralToFuture':
         time = futureCharRow[11] * 3 # [hour]
-
-    else: # For all transit to transit base layer 'XXXToTransit'
-        time = 0.1 / 60 * 3 # [hour]
-
 
     # Calculate resistance per cluster
     resistance1 = [0, 0, 0, 0, 0, 0]
@@ -507,7 +451,7 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
     # Input networkName to select right network & scaling factor to reduce sample size of trips (and speed up simulation).
 
     # Initialize trips
-    f = open('dataset/tripsPre.json')
+    f = open('tripsPre.json')
     data = json.load(f)
     trips = []
 
@@ -526,7 +470,7 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
         trips.append(dictTrips)
         counter += 1
 
-    with open('data/trips.json', 'w', encoding='utf-8') as f:
+    with open('trips.json', 'w', encoding='utf-8') as f:
         json.dump(trips, f, ensure_ascii=False, indent=4)
 
 
@@ -539,7 +483,7 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
         header = ['name', 'type', 'pos_x', 'pos_y', 'source', 'target', 'resistance', 'capacity', 'distance', 'speed', 'defSpeed', 'mode']
         numberOfNodes = 16
 
-        with open('data/simpleNetwork.csv', 'w', encoding='UTF8') as f:
+        with open('simpleNetwork.csv', 'w', encoding='UTF8') as f:
             writer = csv.writer(f)
             writer.writerow(header)
 
@@ -1092,6 +1036,8 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
 
                 distance  = [3, 2, 3, 2.5, 2, 2, 2, 2, 1, 3, 1, 2, 2.5, 2.5, 2, 1, 1.5, 1, 1, 1.5, 5, 2.5, 2.5, 5, 1.5, 1.5, 2.5, 3, 2, 4, 3, 2.5, 3, 2, 2, 3, 1.5, 1.5, 2, 2, 2.5, 2, 3, 2.5, 1.5, 1.5, 2.5, 2, 1, 1.5, 4, 1, 1, 1, 1.5, 2, 1.5, 1, 2, 2, 2, 3, 2.5, 3, 1, 1.5, 1.5, 2.5, 1, 2, 2, 2, 1, 2, 1.5, 1]
                 capacity = [25900, 23403, 25900, 4958, 23403, 17111, 23403, 17111, 17783, 4909, 17783, 4948, 10000, 4958, 4948, 4899, 7842, 23403, 4899, 7842, 5050, 5046, 10000, 5050, 13916, 13916, 10000, 13512, 4855, 4994, 4909, 10000, 4909, 4877, 23403, 4909, 25900, 25900, 5091, 4877, 5128, 4925, 13512, 5128, 14565, 9599, 5046, 4855, 5230, 19680, 4994, 5230, 4824, 23403, 19680, 23403, 14565, 4824, 5003, 23403, 5003, 5060, 5076, 5060, 5230, 4885, 9599, 5076, 5230, 5000, 4925, 5000, 5079, 5091, 4885, 5079]
+                # Nr of lanes for Fundamental Diagram
+                lanes    = [1,   3,   3,   2,   2,   2,   2,   1,   1,   2,   2,   2,   2,   3,   3,   1,   1,   3,   3,   2,   2,   2,   2,   2,   1,   1,   2,   2,   2,   3,   3,   1,   1,   3,   2,   1,   2,   3,   3,   2,   2,   2,   1,   2,   2,   2,   2,   2,   3,   1,   1,   3,   3,   2,   1,   2,   3,   1,   2,   2,   2,   2,   2,   2,   2,   2,   3,   1,   1,   3,   3,   2,   2,   2,   2,   1]
 
                 resistance = [6, 6, 6, 6, 6, 6]
                 resistanceToNeutral = [1, 1, 1, 1, 1, 1]
@@ -1156,7 +1102,7 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
                     # Create links
                     for k in range(len(zonesFrom)):
                         # One-way
-                        data = [layerNumber[j]+k, 'link', 0, 0, layerNumber[j]+zonesFrom[k], layerNumber[j]+zonesTo[k], resistance[j], capacity[k], distance[k], speed[j], defSpeed[j], mode[j]]
+                        data = [layerNumber[j]+k, 'link', 0, 0, layerNumber[j]+zonesFrom[k], layerNumber[j]+zonesTo[k], resistance[j], lanes[k], distance[k], speed[j], defSpeed[j], mode[j]]
                         writer.writerow(data)
                         # Other-way (backwards, demo networks have only 1 direction: forward)
                         # data = [layerNumber[j]+k+5000, 'link', 0, 0, layerNumber[j]+zonesTo[k], layerNumber[j]+zonesFrom[k], resistance[j], capacity[k], distance[k], speed[j], defSpeed[j], mode[j]]
@@ -1165,18 +1111,18 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
                     if 'Multimodal' in networkName:
                         for i in zones:
                             # One-way
-                            data = [layerNumber[j]+i, 'link', 0, 0, layerNumber[j]+i, neutralLayerFactor+i, resistance[j], capacity[k], distanceNeutralToMode[j], speed[j], defSpeed[j], mode[j] + 'ToNeutral']
+                            data = [layerNumber[j]+i, 'link', 0, 0, layerNumber[j]+i, neutralLayerFactor+i, resistance[j], lanes[k], distanceNeutralToMode[j], speed[j], defSpeed[j], mode[j] + 'ToNeutral']
                             writer.writerow(data)
                             # Other-way
-                            data = [layerNumber[j]+i+5000, 'link', 0, 0, neutralLayerFactor+i, layerNumber[j]+i, resistance[j], capacity[k], distanceNeutralToMode[j], speed[j], defSpeed[j], 'NeutralTo' + mode[j]]
+                            data = [layerNumber[j]+i+5000, 'link', 0, 0, neutralLayerFactor+i, layerNumber[j]+i, resistance[j], lanes[k], distanceNeutralToMode[j], speed[j], defSpeed[j], 'NeutralTo' + mode[j]]
                             writer.writerow(data)
                     else:
                         for i in zonesOD:
                             # One-way
-                            data = [layerNumber[j]+i, 'link', 0, 0, layerNumber[j]+i, 0+i, resistanceToNeutral[j], capacity[k], distanceNeutralToMode[j], speed[j], defSpeed[j], mode[j] + 'ToNeutral']
+                            data = [layerNumber[j]+i, 'link', 0, 0, layerNumber[j]+i, 0+i, resistanceToNeutral[j], lanes[k], distanceNeutralToMode[j], speed[j], defSpeed[j], mode[j] + 'ToNeutral']
                             writer.writerow(data)
                             # Other-way
-                            data = [layerNumber[j]+i+5000, 'link', 0, 0, 0+i, layerNumber[j]+i, neutralToResistance[j], capacity[k], distanceNeutralToMode[j], speed[j], defSpeed[j], 'NeutralTo' + mode[j]]
+                            data = [layerNumber[j]+i+5000, 'link', 0, 0, 0+i, layerNumber[j]+i, neutralToResistance[j], lanes[k], distanceNeutralToMode[j], speed[j], defSpeed[j], 'NeutralTo' + mode[j]]
                             writer.writerow(data)
 
                 if 'Multimodal' in networkName:
@@ -1222,7 +1168,7 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
                 # Create centroids
                 zones = [1001, 1002, 1003, 1004, 1005, 1006, 1007, 2611, 2612, 2613, 2614, 2616, 2622, 2623, 2624, 2625, 2626, 2627, 2628, 2629, 3000, 4000, 4001, 4002, 4003, 4004, 4005, 4006, 4007, 4008]
                 zonesOD = [1001, 1002, 1003, 1004, 1005, 1006, 1007, 2611, 2612, 2613, 2614, 2616, 2622, 2623, 2624, 2625, 2626, 2627, 2628, 2629, 3000]
-                zonesODTransit = [1001, 1002, 1003, 1004, 1005, 1006, 1007, 2612, 2613, 2616, 2622, 2623, 2624, 2625, 2628, 2629, 3000, 4000, 4001, 4002, 4003, 4004, 4005, 4006, 4008]
+                zonesODTransit = [1001, 1002, 1005, 1006, 2611, 2613, 2614, 2622, 2623, 2624, 2625, 2627, 2628, 2629, 3000]
 
 
                 data = [1001, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
@@ -1266,25 +1212,6 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
                 data = [2629, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
                 writer.writerow(data)
                 data = [3000, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                writer.writerow(data)
-
-                data = [4000, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                writer.writerow(data)
-                data = [4001, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                writer.writerow(data)
-                data = [4002, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                writer.writerow(data)
-                data = [4003, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                writer.writerow(data)
-                data = [4004, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                writer.writerow(data)
-                data = [4005, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                writer.writerow(data)
-                data = [4006, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                writer.writerow(data)
-                data = [4007, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                writer.writerow(data)
-                data = [4008, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
                 writer.writerow(data)
 
                 if 'Multimodal' in networkName:
@@ -1371,15 +1298,15 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
                 zonesTo   = [4002,    2616,    2613,    1001,    4000,    1002,    4006,    1003,    2629,    2628,    2629,    1005,    4003,    1006,    4002,    4003,    4004,    3000,    4002,    4003,    4006,    4000,    2613,    2612,    1007,    2623,    2625,    2627,    2624,    4007,    4005,    2624,    4006,    1004,    2623,    2622,    4007,    4008,    4003,    4008,    2628,    4008,    2627,    2623,    2613,    4007,    4001,    2613,    4002,    2611,    2613,    4003,    4008,    3000,    4006,    2613,    3000]
                 distance  = [2.04,    2.04,    4.28,    2.35,    5.54,    2.82,    3.81,    4.20,    6.24,    3.61,    3.61,    3.61,    3.61,    3.61,    2.33,    0.93,    0.93,    0.93,    1.36,    2.33,    2.47,    1.38,    1.52,    3.61,    2.04,    2.62,    2.37,    4.15,    2.80,    2.64,    2.19,    2.19,    2.47,    4.67,    5.57,    3.15,    2.64,    2.95,    2.54,    2.54,    1.99,    6.24,    4.52,    4.52,    0.93,    2.64,    1.52,    1.68,    1.36,    0.93,    1.68,    2.54,    2.54,    1.52,    1.38,    1.68,    1.52]
 
-                # # For transit layer (fewer connections)                                                                                                                                                                                                                    
-                # zonesFromTransit = [1002,    1006,    2611,    2611,    2611,    2613,    2614,    2622,    2623,    2623,    2623,    2625,    2625,    2628,    2628,    2629,    3000,    4000,    4000,    4000,    4001,    4001,    4001,    4002,    4002,    4003,    4003,    4004,    4004,    4005,    4005,    4005,    4006,    4006,    4007,    4007,    4008]                                                                                
-                # zonesToTransit   = [4000,    1005,    3000,    4003,    4004,    3000,    2613,    2625,    2622,    2624,    2627,    2624,    4006,    1006,    4008,    2623,    4007,    2613,    2614,    4001,    2611,    2613,    4002,    1001,    2611,    2628,    4004,    3000,    4008,    2613,    2624,    3000,    2614,    4005,    2624,    2627,    2629]                                                                               
-                # distanceTransit  = [5.54,    3.61,    0.93,    2.33,    0.93,    0.93,    1.52,    2.37,    2.62,    2.80,    4.15,    2.19,    2.47,    3.61,    2.54,    4.52,    2.64,    1.68,    1.38,    1.52,    0.93,    1.68,    1.36,    2.04,    2.33,    2.54,    2.54,    1.52,    2.54,    1.68,    2.19,    1.52,    2.47,    1.38,    2.64,    2.64,    6.24]                                                                                
+                # For transit layer (fewer connections)                                                                                                                                                                                                                    
+                zonesFromTransit = [1002,    1006,    2611,    2611,    2611,    2613,    2614,    2622,    2623,    2623,    2623,    2625,    2625,    2628,    2628,    2629,    3000,    4000,    4000,    4000,    4001,    4001,    4001,    4002,    4002,    4003,    4003,    4004,    4004,    4005,    4005,    4005,    4006,    4006,    4007,    4007,    4008]                                                                                
+                zonesToTransit   = [4000,    1005,    3000,    4003,    4004,    3000,    2613,    2625,    2622,    2624,    2627,    2624,    4006,    1006,    4008,    2623,    4007,    2613,    2614,    4001,    2611,    2613,    4002,    1001,    2611,    2628,    4004,    3000,    4008,    2613,    2624,    3000,    2614,    4005,    2624,    2627,    2629]                                                                               
+                distanceTransit  = [5.54,    3.61,    0.93,    2.33,    0.93,    0.93,    1.52,    2.37,    2.62,    2.80,    4.15,    2.19,    2.47,    3.61,    2.54,    4.52,    2.64,    1.68,    1.38,    1.52,    0.93,    1.68,    1.36,    2.04,    2.33,    2.54,    2.54,    1.52,    2.54,    1.68,    2.19,    1.52,    2.47,    1.38,    2.64,    2.64,    6.24]                                                                                
 
                 # For carpool layer (fewer connection and only to Delft station (3000))
-                # zonesFromCarpool = [1001,    1002,    1003,    1004,    1006,    1007,    2611,    2612,    2613,    2614,    2616,    2622,    2623,    2624,    2625,    2626,    2627,    2628,    2629,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000]
-                # zonesToCarpool   = [3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    1001,    1002,    1003,    1004,    1006,    1007,    2611,    2612,    2613,    2614,    2616,    2622,    2623,    2624,    2625,    2626,    2627,    2628,    2629]
-                # distanceCarpool  = [3.5,     3.6,     5.6,     4.1,     4.6,     5.2,     2.2,     2.2,     1.5,     2.9,     4.7,     4.6,     3.7,     2.6,     3.2,     6.4,     2.5,     3.6,     4.9,     3.5,     3.6,     5.6,     4.1,     4.6,     5.2,     2.2,     2.2,     1.5,     2.9,     4.7,     4.6,     3.7,     2.6,     3.2,     6.4,     2.5,     3.6,     4.9]
+                zonesFromCarpool = [1001,    1002,    1003,    1004,    1006,    1007,    2611,    2612,    2613,    2614,    2616,    2622,    2623,    2624,    2625,    2626,    2627,    2628,    2629,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000]
+                zonesToCarpool   = [3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    3000,    1001,    1002,    1003,    1004,    1006,    1007,    2611,    2612,    2613,    2614,    2616,    2622,    2623,    2624,    2625,    2626,    2627,    2628,    2629]
+                distanceCarpool  = [3.5,     3.6,     5.6,     4.1,     4.6,     5.2,     2.2,     2.2,     1.5,     2.9,     4.7,     4.6,     3.7,     2.6,     3.2,     6.4,     2.5,     3.6,     4.9,     3.5,     3.6,     5.6,     4.1,     4.6,     5.2,     2.2,     2.2,     1.5,     2.9,     4.7,     4.6,     3.7,     2.6,     3.2,     6.4,     2.5,     3.6,     4.9]
 
                 resistance = [6, 6, 6, 6, 6, 6]
                 resistanceToNeutral = [1, 1, 1, 1, 1, 1]
@@ -1392,7 +1319,7 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
 
                 for j in range(nrOfModes):
 
-                    if (j != 2):
+                    if (j != 2 and j != 1):
                         # Create nodes
                         data = [layerNumber[j]+1001, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
                         writer.writerow(data)
@@ -1482,14 +1409,74 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
 
 
                     elif j == 2: # Transit layer
+                        # Create nodes
+                        data = [layerNumber[j]+1001, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+1002, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+1005, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+1006, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+2611, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+2613, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+2614, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+2622, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+2623, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+2624, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+2625, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+2627, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+2628, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+2629, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+3000, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
+                        writer.writerow(data)
 
-                        # Steps
-                        # Create nodes, basic transit layer
-                        # Create array with all edges of each line
-                        # Create nodes for each line
-                        # Create edges between line-layer and main transit layer
+                        data = [layerNumber[j]+4000, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+4001, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+4002, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+4003, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+4004, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+4005, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+4006, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+4007, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
+                        writer.writerow(data)
+                        data = [layerNumber[j]+4008, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
+                        writer.writerow(data)
 
-                        # Create nodes, basic transit layer
+                        # Create links
+                        for k in range(len(zonesFromTransit)):
+                            data = [layerNumber[j]+k, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k], layerNumber[j]+zonesToTransit[k], resistance[j], capacity[j], distanceTransit[k], speed[j], defSpeed[j], mode[j]]
+                            writer.writerow(data)
+                            data = [layerNumber[j]+k+5000, 'link', 0, 0, layerNumber[j]+zonesToTransit[k], layerNumber[j]+zonesFromTransit[k], resistance[j], capacity[j], distanceTransit[k], speed[j], defSpeed[j], mode[j]]
+                            writer.writerow(data)
+
+                        for i in zonesODTransit:
+                            # One-way
+                            data = [layerNumber[j]+i, 'link', 0, 0, layerNumber[j]+i, neutralLayerFactor+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speed[j], defSpeed[j], mode[j] + 'ToNeutral']
+                            writer.writerow(data)
+                            # Other-way
+                            data = [layerNumber[j]+i+5000, 'link', 0, 0, neutralLayerFactor+i, layerNumber[j]+i, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speed[j], defSpeed[j], 'NeutralTo' + mode[j]]
+                            writer.writerow(data)
+
+                    else: # j == 1, Carpool layer
+                        # Create nodes
                         data = [layerNumber[j]+1001, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
                         writer.writerow(data)
                         data = [layerNumber[j]+1002, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
@@ -1533,1330 +1520,19 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
                         data = [layerNumber[j]+3000, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
                         writer.writerow(data)
 
-                        data = [layerNumber[j]+4000, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
+                        # Create links
+                        for k in range(len(zonesFromCarpool)):
+                            data = [layerNumber[j]+k, 'link', 0, 0, layerNumber[j]+zonesFromCarpool[k], layerNumber[j]+zonesToCarpool[k], resistance[j], capacity[j], distanceCarpool[k], speed[j], defSpeed[j], mode[j]]
+                            writer.writerow(data)
+                            data = [layerNumber[j]+k+5000, 'link', 0, 0, layerNumber[j]+zonesToCarpool[k], layerNumber[j]+zonesFromCarpool[k], resistance[j], capacity[j], distanceCarpool[k], speed[j], defSpeed[j], mode[j]]
+                            writer.writerow(data)
 
-                        # Create links to neutral layer
-                        for i in zonesODTransit:
+                        for i in zonesOD:
                             # One-way
                             data = [layerNumber[j]+i, 'link', 0, 0, layerNumber[j]+i, neutralLayerFactor+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speed[j], defSpeed[j], mode[j] + 'ToNeutral']
                             writer.writerow(data)
                             # Other-way
                             data = [layerNumber[j]+i+5000, 'link', 0, 0, neutralLayerFactor+i, layerNumber[j]+i, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speed[j], defSpeed[j], 'NeutralTo' + mode[j]]
-                            writer.writerow(data)
-
-                        ##########################################################################################################################################
-
-
-                        # Tram 1
-                        transitLine      = 'Tram001'
-                        transitNumber    = 100000
-                        speedTransit     = 19 # [km/h]
-
-                        nodesTransit     = [2622, 2625, 2624, 4005, 3000, 4001, 4002, 1001]
-                        zonesFromTransit = [2622, 2625, 2624, 4005, 3000, 4001, 4002]
-                        zonesToTransit   = [2625, 2624, 4005, 3000, 4001, 4002, 1001]
-                        distanceTransit  = [2.37, 2.19, 2.19, 1.52, 1.68, 1.36, 2.04]
-
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
-                            writer.writerow(data)
-
-
-                        # Tram 19
-                        transitLine      = 'Tram019'
-                        transitNumber    = 1900000
-                        speedTransit     = 19 # [km/h]
-
-                        nodesTransit     = [3000, 4001, 4002, 2616]
-                        zonesFromTransit = [3000, 4001, 4002]
-                        zonesToTransit   = [4001, 4002, 2616]
-                        distanceTransit  = [1.68, 1.36, 2.04]
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
-                            writer.writerow(data)
-
-
-
-                        # Bus 455
-                        transitLine      = 'Bus455'
-                        transitNumber    = 45500000
-                        speedTransit     = 25 # [km/h]
-
-                        nodesTransit     = [1004, 4006, 4005, 3000, 4004, 4008, 2628, 1006, 1007]
-                        zonesFromTransit = [1004, 4006, 4005, 3000, 4004, 4008, 2628, 1006]
-                        zonesToTransit   = [4006, 4005, 3000, 4004, 4008, 2628, 1006, 1007]
-                        distanceTransit  = [3.81, 1.38, 1.52, 1.52, 2.54, 2.54, 3.61, 3.61]
-
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
-                            writer.writerow(data)
-
-                        # Bus 40
-                        transitLine      = 'Bus040'
-                        transitNumber    = 4000000
-                        speedTransit     = 25 # [km/h]
-
-                        nodesTransit     = [3000, 4004, 4008, 2629, 1005]
-                        zonesFromTransit = [3000, 4004, 4008, 2629]
-                        zonesToTransit   = [4004, 4008, 2629, 1005]
-                        distanceTransit  = [1.52, 2.54, 6.24, 6.24]
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
-                            writer.writerow(data)
-
-                        # Bus 174
-                        transitLine      = 'Bus174'
-                        transitNumber    = 17400000
-                        speedTransit     = 25 # [km/h]
-
-                        nodesTransit     = [3000, 4004, 4008, 2628, 1006, 1007]
-                        zonesFromTransit = [3000, 4004, 4008, 2628, 1006]
-                        zonesToTransit   = [4004, 4008, 2628, 1006, 1007]
-                        distanceTransit  = [1.52, 2.54, 2.54, 3.61, 3.61]
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
-                            writer.writerow(data)
-
-                        # Bus 60
-                        transitLine      = 'Bus060'
-                        transitNumber    = 6000000
-                        speedTransit     = 25 # [km/h]
-
-                        nodesTransit     = [3000, 4004, 4003, 2612, 2616]
-                        zonesFromTransit = [3000, 4004, 4003, 2612]
-                        zonesToTransit   = [4004, 4003, 2612, 2616]
-                        distanceTransit  = [1.52, 2.54, 2.33, 3.61]
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
-                            writer.writerow(data)
-
-                        # Bus 61
-                        transitLine      = 'Bus061'
-                        transitNumber    = 6100000
-                        speedTransit     = 25 # [km/h]
-
-                        nodesTransit     = [3000, 2613, 4000, 1002]
-                        zonesFromTransit = [3000, 2613, 4000]
-                        zonesToTransit   = [2613, 4000, 1002]
-                        distanceTransit  = [0.93, 1.68, 4.28]
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
-                            writer.writerow(data)
-
-                        # Bus 62
-                        transitLine      = 'Bus062'
-                        transitNumber    = 6200000
-                        speedTransit     = 25 # [km/h]
-
-                        nodesTransit     = [3000, 4004, 4003, 1006]
-                        zonesFromTransit = [3000, 4004, 4003]
-                        zonesToTransit   = [4004, 4003, 1006]
-                        distanceTransit  = [1.52, 2.54, 3.61]
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
-                            writer.writerow(data)
-
-                        # Bus 63
-                        transitLine      = 'Bus063'
-                        transitNumber    = 6300000
-                        speedTransit     = 25 # [km/h]
-
-                        nodesTransit     = [3000, 4004, 4003]
-                        zonesFromTransit = [3000, 4004]
-                        zonesToTransit   = [4004, 4003]
-                        distanceTransit  = [1.52, 2.54]
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
-                            writer.writerow(data)
-
-                        # Bus 64
-                        transitLine      = 'Bus064'
-                        transitNumber    = 6400000
-                        speedTransit     = 25 # [km/h]
-
-                        nodesTransit     = [3000, 4005, 2624, 2623, 2622]
-                        zonesFromTransit = [3000, 4005, 2624, 2623]
-                        zonesToTransit   = [4005, 2624, 2623, 2622]
-                        distanceTransit  = [1.52, 2.19, 2.80, 2.62]
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
-                            writer.writerow(data)
-
-                        # Bus 69
-                        transitLine      = 'Bus069'
-                        transitNumber    = 6900000
-                        speedTransit     = 25 # [km/h]
-
-                        nodesTransit     = [3000, 4004, 4008, 2629]
-                        zonesFromTransit = [3000, 4004, 4008]
-                        zonesToTransit   = [4004, 4008, 2629]
-                        distanceTransit  = [1.52, 2.54, 6.24]
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
-                            writer.writerow(data)
-
-                        # Bus 33
-                        transitLine      = 'Bus033'
-                        transitNumber    = 3300000
-                        speedTransit     = 25 # [km/h]
-
-                        nodesTransit     = [3000, 4005, 4006, 1004]
-                        zonesFromTransit = [3000, 4005, 4006]
-                        zonesToTransit   = [4005, 4006, 1004]
-                        distanceTransit  = [1.52, 1.38, 3.81]
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
-                            writer.writerow(data)
-
-                        # Bus 37
-                        transitLine      = 'Bus037'
-                        transitNumber    = 3700000
-                        speedTransit     = 25 # [km/h]
-
-                        nodesTransit     = [3000, 4005, 4006, 1003]
-                        zonesFromTransit = [3000, 4005, 4006]
-                        zonesToTransit   = [4005, 4006, 1003]
-                        distanceTransit  = [1.52, 1.38, 6.10]
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
-                            writer.writerow(data)
-
-                        # Bus 53
-                        transitLine      = 'Bus053'
-                        transitNumber    = 5300000
-                        speedTransit     = 25 # [km/h]
-
-                        nodesTransit     = [3000, 4001, 4002, 1001]
-                        zonesFromTransit = [3000, 4001, 4002]
-                        zonesToTransit   = [4001, 4002, 1001]
-                        distanceTransit  = [1.68, 1.36, 2.04]
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
-                            writer.writerow(data)
-
-                        # Train
-                        transitLine      = 'Train015'
-                        transitNumber    = 1500000
-                        speedTransit     = 42 # [km/h]
-
-                        nodesTransit     = [3000, 4002, 1001]
-                        zonesFromTransit = [3000]
-                        zonesToTransit   = [4002]
-                        distanceTransit  = [2.10]
-
-                        data = [layerNumber[j]+1001+transitNumber, 'node', 83514.38281250000000, 450414.2500000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1002+transitNumber, 'node', 81754.23437500000000, 450006.8125000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1003+transitNumber, 'node', 80740.95312500000000, 448160.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1004+transitNumber, 'node', 81413.66406250000000, 445168.9375000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1005+transitNumber, 'node', 86561.98573592488537, 442724.2360644022119, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1006+transitNumber, 'node', 86889.34375000000000, 446489.3437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+1007+transitNumber, 'node', 87433.92968750000000, 447491.8437500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2611+transitNumber, 'node', (84290.72656250000000 + 84582.06250000000000)/2, (447866.0625000000000 + 447480.3437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2612+transitNumber, 'node', (84100.17968750000000 + 85027.17187500000000)/2, (449364.6562500000000 + 448265.3125000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2613+transitNumber, 'node', 83649.67968750000000, 447266.4687500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2614+transitNumber, 'node', 82895.68750000000000, 447039.6562500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2616+transitNumber, 'node', 85612.89337839159998, 449648.7369987610145, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2622+transitNumber, 'node', 83076.39417873916681, 443848.4507972683059, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2623+transitNumber, 'node', 84616.39843750000000, 444239.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2624+transitNumber, 'node', 84268.64843750000000, 445737.0000000000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2625+transitNumber, 'node', 83044.39843750000000, 445531.5312500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2626+transitNumber, 'node', 83598.14237760189280, 442713.5747573578846, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2627+transitNumber, 'node', (84720.35156250000000 + 85360.65625000000000)/2, (446023.1250000000000 + 444415.7500000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2628+transitNumber, 'node', (85991.51634928799467 + 85631.52343750000000)/2, (446364.2944520757882 + 446012.8437500000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+2629+transitNumber, 'node', 86073.45312500000000, 444506.9062500000000, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+3000+transitNumber, 'node', 84220.19752310098556, 447017.0427329398808, 0, 0]
-                        writer.writerow(data)
-
-                        data = [layerNumber[j]+4000+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.448 + 80740.95312500000000*0.552), ((447866.0625000000000 + 447480.3437500000000)/2*0.448 + 448160.9062500000000*0.552), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4001+transitNumber, 'node', (81754.23437500000000 + (85991.51634928799467 + 85631.52343750000000)/2)/2, (450006.8125000000000 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4002+transitNumber, 'node', (83514.38281250000000*0.35 + (84290.72656250000000 + 84582.06250000000000)/2*0.65), (450414.2500000000000*0.35 + (447866.0625000000000 + 447480.3437500000000)/2*0.65), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4003+transitNumber, 'node', ((84100.17968750000000 + 85027.17187500000000)/2 + (85991.51634928799467 + 85631.52343750000000)/2)/2, ((449364.6562500000000 + 448265.3125000000000)/2 + (446364.2944520757882 + 446012.8437500000000)/2)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4004+transitNumber, 'node', ((84290.72656250000000 + 84582.06250000000000)/2*0.59 + (85991.51634928799467 + 85631.52343750000000)/2*0.41), ((447866.0625000000000 + 447480.3437500000000)/2*0.59 + (446364.2944520757882 + 446012.8437500000000)/2*0.41), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4005+transitNumber, 'node', (84220.19752310098556 + 84268.64843750000000)/2, (447017.0427329398808 + 445737.0000000000000)/2, 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4006+transitNumber, 'node', (82895.68750000000000*0.37 + 83044.39843750000000*0.63), (447039.6562500000000*0.37 + 445531.5312500000000*0.63), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4007+transitNumber, 'node', (84268.64843750000000*0.86 + 86889.34375000000000*0.14), (445737.0000000000000*0.86 + 446489.3437500000000*0.14), 0, 0]
-                        writer.writerow(data)
-                        data = [layerNumber[j]+4008+transitNumber, 'node', ((85991.51634928799467 + 85631.52343750000000)/2*0.89 + (82895.68750000000000*0.37 + 83044.39843750000000*0.63)*0.11), ((446364.2944520757882 + 446012.8437500000000)/2*0.89 + (447039.6562500000000*0.37 + 445531.5312500000000*0.63)*0.11), 0, 0]
-                        writer.writerow(data)
-
-                        for k in range(len(zonesFromTransit)):
-                            data = [layerNumber[j]+k+transitNumber, 'link', 0, 0, layerNumber[j]+zonesFromTransit[k]+transitNumber, layerNumber[j]+zonesToTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-                            data = [layerNumber[j]+k+5000+transitNumber, 'link', 0, 0, layerNumber[j]+zonesToTransit[k]+transitNumber, layerNumber[j]+zonesFromTransit[k]+transitNumber, resistance[j], capacity[j], distanceTransit[k], speedTransit, speedTransit, transitLine]
-                            writer.writerow(data)
-
-                        for i in nodesTransit:
-                            # One-way
-                            data = [layerNumber[j]+i+transitNumber, 'link', 0, 0, layerNumber[j]+i+transitNumber, layerNumber[j]+i, resistanceToNeutral[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, transitLine + 'ToTransit']
-                            writer.writerow(data)
-                            # Other-way
-                            data = [layerNumber[j]+i+5000+transitNumber, 'link', 0, 0, layerNumber[j]+i, layerNumber[j]+i+transitNumber, neutralToResistance[j], capacity[j], distanceNeutralToMode[j], speedTransit, speedTransit, 'TransitTo' + transitLine]
                             writer.writerow(data)
 
 
@@ -2874,7 +1550,7 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
 
     # CSV to JSON
     
-    entriesFile = r'data/simpleNetwork.csv' # Path to csv
+    entriesFile = r'simpleNetwork.csv' # Path to csv
 
     # Create an empty dictionary to collect values
     nodes = []
@@ -2941,21 +1617,144 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
             "multigraph": 'False'
         }
 
-    with open('data/simpleNetwork.json', 'w', encoding='utf-8') as f:
+    with open('simpleNetwork.json', 'w', encoding='utf-8') as f:
         json.dump(dictNodes, f, ensure_ascii=False, indent=4)
 
     print('Finished converting CSV to JSON')
     return links
 
 
+def calcFirstPositions(trips_timeStep, G, networkName, seed, MNLbeta, MNLmu, pos):
+
+    trips = []
+    linksCongestion = []
+
+    for index, row in trips_timeStep.iterrows():
+
+        # Determine next node to reach goal
+        prevPrevSource = "NAN" # There is no previous source yet
+        prevSource = "NAN" # There is no previous source yet
+        recSource = str(int(row["origin"]))
+        recTarget = str(int(row["destination"]))
+        cluster = str(round(row["type"]))
+        nextTarget = nextNode(G, prevPrevSource, prevSource, recSource, recTarget, cluster, networkName, seed, MNLbeta, MNLmu)
+
+        # Initialize starting point in network
+        positionLink = 0
+        pos_x = pos[recSource][0]
+        pos_y = pos[recSource][1]
+        speed = 0
+
+        # Write in dataset to be called in next step as start
+        dictTrip = {
+            "id": str(round(float(row["id"]), 1)),
+            "prevPrevSource": str(row["origin"]),
+            "prevSource": str(int(row["origin"])),
+            "recSource": recSource,
+            "recTarget": recTarget,
+            "nextTarget": nextTarget,
+            "pos_x": pos_x,
+            "pos_y": pos_y,
+            "positionLink": positionLink,
+            "speed": speed,
+            "cluster": str(row["type"]),
+        }
+        trips.append(dictTrip)
+
+        # Write agents on link for congestion calculation
+        dictLinks = {
+            "recSource": recSource,
+            "recTarget": nextTarget,
+        }
+        linksCongestion.append(dictLinks)
+
+    return [trips, linksCongestion]
+
+
+def calcNextPositions(tripsPrev, G, timeStep, networkName, seed, MNLbeta, MNLmu, pos):
+
+    trips = []
+    linksCongestion = []
+
+    # Calculate next positions trips in network
+    for index, row in tripsPrev.iterrows():
+
+        # Determine next node to reach goal
+        prevPrevSource = str(row["prevPrevSource"])
+        prevSource = str(row["prevSource"])
+        recSource = str(row["recSource"])
+        recTarget = str(row["recTarget"])
+        nextTarget = str(row["nextTarget"])
+        cluster = str(row["cluster"])
+
+        # Speed is calculated when entering link.
+        # When link gets more congested, speed goed down for subsequent agents, but stays the same for agents already on the link.
+        # When link gets less congested, speed goes up for all agents on the link if this speed is higher than their initial speed on this link.
+        speed = max(G[recSource][nextTarget][0]['speed'], row["speed"])
+
+        # Calculate location (coordinates, not nodes) next timestep
+        # Value between 0 and 1, depending on how far the agent is progressed on one link
+        if (G[recSource][nextTarget][0]['distance'] != 0):
+            positionLink = timeStep * speed / G[recSource][nextTarget][0]['distance'] + row["positionLink"]
+        else:
+            positionLink = 1 # Move to next link, since distance = 0 and evaluate again
+        
+        # Update recSource if end of link has been reached
+        if positionLink >= 1:
+            # try:
+            if nextTarget != recTarget:
+                recSource = str(row["nextTarget"])
+                prevPrevSource = str(row["prevSource"])
+                prevSource = str(row["recSource"])
+                nextTarget = nextNode(G, prevPrevSource, prevSource, recSource, recTarget, cluster, networkName, seed, MNLbeta, MNLmu)
+            else: # End of route, agent is removed from network
+                continue
+
+            # Calculate proportion in new link during timestep
+            proportion = 1 - ((1 - row["positionLink"]) / (positionLink - row["positionLink"]))
+            speed = G[recSource][nextTarget][0]['speed']
+            positionLink = proportion * timeStep * speed / G[recSource][nextTarget][0]['distance']
+
+
+        pos_x = pos[recSource][0] * (1 - positionLink) + pos[nextTarget][0] * positionLink
+        pos_y = pos[recSource][1] * (1 - positionLink) + pos[nextTarget][1] * positionLink
+
+        # Write in dataset to be called in next step as start (to calculate congestion)
+        dictTrip = {
+            "id": str(round(float(row["id"]), 1)),
+            "prevPrevSource": prevPrevSource, # prevPrevSource
+            "prevSource": prevSource, # prevSource,
+            "recSource": recSource,
+            "recTarget": recTarget,
+            "nextTarget": nextTarget,
+            "pos_x": pos_x,
+            "pos_y": pos_y,
+            "positionLink": positionLink,
+            "speed": speed,
+            "cluster": str(row["cluster"]),
+        }
+        trips.append(dictTrip)
+
+        # Write agents on link for congestion calculation
+        dictLinks = {
+            "recSource": recSource,
+            "recTarget": nextTarget,
+        }
+        linksCongestion.append(dictLinks)
+
+    return [trips, linksCongestion]
+
+
+
+
 def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time, timeStep, networkName, seed, MNLbeta, MNLmu, nameFuture):
 
     # Load json networkx datafile
-    with open('data/simpleNetwork.json','r') as infile:
+    with open('simpleNetwork.json','r') as infile:
         G = nx.json_graph.node_link_graph(json.load(infile))
 
     # Load link capacities
-    dfBPR = pd.read_csv('dataset/BPR_all_links.csv', sep=';', decimal=",")
+    # dfBPR = pd.read_csv('dataset/BPR_all_links.csv', sep=';', decimal=",")
 
     for i in time:
         if i > 0:
@@ -2963,148 +1762,68 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
         pos = nx.get_node_attributes(G, 'pos')
 
         # Simulate
-        newTrips = pd.read_json('data/trips.json')
+        newTrips = pd.read_json('trips.json')
 
         # Initialize shortestPathsList
         shortestPathsList = np.array([0, 0])
+
+        # Create as many processes as there are CPUs on your machine
+        num_processes = mp.cpu_count() - 1 # 8 - 1 to account for last chunk if range is not covering all trips exactly
 
         # Initialize trips dictionaries
         trips = []
         linksCongestion = []
         if i > 0:
-            tripsPrev = pd.read_pickle('data/tripsTimeStep' + str(i-1) + '.pkl') # Load trips previous timestep
+            tripsPrev = pd.read_pickle('tripsTimeStep' + str(i-1) + '.pkl') # Load trips previous timestep
+            if len(tripsPrev.index) > 0:
+                if len(tripsPrev.index) <= 2*num_processes:
+                    num_processes = 1
+                # Calculate chunk size and divide trips into chunks to be iterated through
+                chunk_size = int(len(tripsPrev.index)/(num_processes))
+                chunks = [tripsPrev[n:min(n + chunk_size, tripsPrev.shape[0])] for n in range(0, tripsPrev.shape[0], chunk_size)]
 
-            # Calculate next positions trips in network
-            for index, row in tripsPrev.iterrows():
+                # Calculate next positions trips in network for chunks parallel
+                with mp.Pool() as pool:
+                    pool = mp.Pool(processes=num_processes)
+                    async_results = [pool.apply_async(calcNextPositions, args=(chunks[m], G, timeStep, networkName, seed, MNLbeta, MNLmu, pos)) for m in range(num_processes)]
+                    results = [ar.get() for ar in async_results]
+                    pool.close()
+                    pool.join()
 
-                # Determine next node to reach goal
-                prevPrevSource = str(row["prevPrevSource"])
-                prevSource = str(row["prevSource"])
-                recSource = str(row["recSource"])
-                recTarget = str(row["recTarget"])
-                nextTarget = str(row["nextTarget"])
-                cluster = str(row["cluster"])
-
-                # Speed is calculated when entering link.
-                # When link gets more congested, speed goed down for subsequent agents, but stays the same for agents already on the link.
-                # When link gets less congested, speed goes up for all agents on the link if this speed is higher than their initial speed on this link.
-                speed = max(G[recSource][nextTarget][0]['speed'], row["speed"])
-
-                # Calculate location (coordinates, not nodes) next timestep
-                # Value between 0 and 1, depending on how far the agent is progressed on one link
-                if (G[recSource][nextTarget][0]['distance'] != 0):
-                    positionLink = timeStep * speed / G[recSource][nextTarget][0]['distance'] + row["positionLink"]
-                else:
-                    positionLink = 1 # Move to next link, since distance = 0 and evaluate again
-                
-                # Update recSource if end of link has been reached
-                if positionLink >= 1:
-                    # try:
-                    if nextTarget != recTarget:
-                        recSource = str(row["nextTarget"])
-                        prevPrevSource = str(row["prevSource"])
-                        prevSource = str(row["recSource"])
-                        # try:
-                        #     nextTarget = shortestPathsList[np.nonzero(shortestPathsList[:][0] == (recSource + "00" + recTarget + "00" + cluster))[0][0]][1]
-                        #     print('fromList')
-                        # except:
-                        try:
-                            nextTarget = nextNode(G, prevPrevSource, prevSource, recSource, recTarget, cluster, networkName, seed, MNLbeta, MNLmu)
-                        except:
-                            print('Warning: Next node could not be determined for trip with prevSource', prevSource, 'recSource', recSource)
-                            continue
-                            # shortestPathsList = np.append([(recSource + "00" + recTarget + "00" + cluster), nextTarget], [shortestPathsList])
-                            # print('fromNextNode')
-                            # print(shortestPathsList)
-                    else: # End of route, agent is removed from network
-                        continue
-
-                    # Calculate proportion in new link during timestep
-                    proportion = 1 - ((1 - row["positionLink"]) / (positionLink - row["positionLink"]))
-                    speed = G[recSource][nextTarget][0]['speed']
-                    positionLink = proportion * timeStep * speed / G[recSource][nextTarget][0]['distance']
-
-
-                pos_x = pos[recSource][0] * (1 - positionLink) + pos[nextTarget][0] * positionLink
-                pos_y = pos[recSource][1] * (1 - positionLink) + pos[nextTarget][1] * positionLink
-
-                # Write in dataset to be called in next step as start (to calculate congestion)
-                dictTrip = {
-                    "id": str(round(float(row["id"]), 1)),
-                    "prevPrevSource": prevPrevSource, # prevPrevSource
-                    "prevSource": prevSource, # prevSource,
-                    "recSource": recSource,
-                    "recTarget": recTarget,
-                    "nextTarget": nextTarget,
-                    "pos_x": pos_x,
-                    "pos_y": pos_y,
-                    "positionLink": positionLink,
-                    "speed": speed,
-                    "cluster": str(row["cluster"]),
-                }
-                trips.append(dictTrip)
-
-                # Write agents on link for congestion calculation
-                dictLinks = {
-                    "recSource": recSource,
-                    "recTarget": nextTarget,
-                }
-                linksCongestion.append(dictLinks)
-
+                for m in range(num_processes):
+                    tripsTemp = results[m][0]
+                    linksCongestionTemp = results[m][1]
+                    trips.extend(tripsTemp)
+                    linksCongestion.extend(linksCongestionTemp)
 
         # Load new trips in network
         trips_timeStep = newTrips.loc[newTrips["depTime"] == i]
+        if len(trips_timeStep) > 0:
+            if len(trips_timeStep.index) <= 2*num_processes:
+                    num_processes = 1
+                    chunks = [trips_timeStep]
+            else:
+                # Calculate chunk size and divide trips into chunks to be iterated through
+                chunk_size = int(len(trips_timeStep.index)/(num_processes))
+                chunks = [trips_timeStep[n:min(n + chunk_size, trips_timeStep.shape[0])] for n in range(0, trips_timeStep.shape[0], chunk_size)]
 
-        for index, row in trips_timeStep.iterrows():
+            # Calculate next positions trips in network for chunks parallel
+            with mp.Pool() as pool:
+                pool = mp.Pool(processes=num_processes)
+                async_results = [pool.apply_async(calcFirstPositions, args=(chunks[m], G, networkName, seed, MNLbeta, MNLmu, pos)) for m in range(num_processes)]
+                results = [ar.get() for ar in async_results]
+                pool.close()
+                pool.join()
 
-            # Determine next node to reach goal
-            prevPrevSource = "NAN" # There is no previous source yet
-            prevSource = "NAN" # There is no previous source yet
-            recSource = str(int(row["origin"]))
-            recTarget = str(int(row["destination"]))
-            cluster = str(round(row["type"]))
-            # try:
-            #     # indexPath = np.nonzero(shortestPathsList == (recSource + "00" + recTarget + "00" + cluster))[0][0]
-            #     nextTarget = shortestPathsList[np.nonzero(shortestPathsList[:][0] == (recSource + "00" + recTarget + "00" + cluster))[0][0]][1]
-            #     print('fromList')
-            # except:
-            nextTarget = nextNode(G, prevPrevSource, prevSource, recSource, recTarget, cluster, networkName, seed, MNLbeta, MNLmu)
-                # shortestPathsList = np.append([(recSource + "00" + recTarget + "00" + cluster), nextTarget], [shortestPathsList])
-                # print(shortestPathsList)
-                # print('fromNextNode')
-
-            # Initialize starting point in network
-            positionLink = 0
-            pos_x = pos[recSource][0]
-            pos_y = pos[recSource][1]
-            speed = 0
-
-            # Write in dataset to be called in next step as start
-            dictTrip = {
-                "id": str(round(float(row["id"]), 1)),
-                "prevPrevSource": str(row["origin"]),
-                "prevSource": str(int(row["origin"])),
-                "recSource": recSource,
-                "recTarget": recTarget,
-                "nextTarget": nextTarget,
-                "pos_x": pos_x,
-                "pos_y": pos_y,
-                "positionLink": positionLink,
-                "speed": speed,
-                "cluster": str(row["type"]),
-            }
-            trips.append(dictTrip)
-
-            # Write agents on link for congestion calculation
-            dictLinks = {
-                "recSource": recSource,
-                "recTarget": nextTarget,
-            }
-            linksCongestion.append(dictLinks)
+            for m in range(num_processes):
+                tripsTemp = results[m][0]
+                linksCongestionTemp = results[m][1]
+                trips.extend(tripsTemp)
+                linksCongestion.extend(linksCongestionTemp)
 
         # Save all trips with details for current timestep
         CWD = Path(__file__).parent
-        filename = str(CWD) + '/data/tripsTimeStep' + str(i) + '.pkl'
+        filename = str(CWD) + '/tripsTimeStep' + str(i) + '.pkl'
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         tripsDF = pd.DataFrame.from_dict(trips)
         tripsDF.to_pickle(filename)
@@ -3242,11 +1961,11 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
                 nrOfAgents = 0
 
             capacity = row['capacity']
-            try:
-                dfBPRRow = dfBPR.loc[(dfBPR['PythonO'].astype('str') == row['source'][-4:]) & (dfBPR['PythonD'].astype('str') == row['target'][-4:])]
-                capacity = float(dfBPRRow['Cfill']) # [veh/hour]
-            except: # When moving between layers, no need for determining capacity
-                pass
+            # try:
+            #     dfBPRRow = dfBPR.loc[(dfBPR['PythonO'].astype('str') == row['source'][-4:]) & (dfBPR['PythonD'].astype('str') == row['target'][-4:])]
+            #     capacity = float(dfBPRRow['Cfill']) # [veh/hour]
+            # except: # When moving between layers, no need for determining capacity
+            #     pass
 
 
             # Look-up congestion on link
@@ -3287,7 +2006,7 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
         }
 
         # Save all trips with details for current timestep
-        with open('data/linksTimeStep' + str(i) + '.json', 'w', encoding='utf-8') as f:
+        with open('linksTimeStep' + str(i) + '.json', 'w', encoding='utf-8') as f:
             json.dump(dictNodes, f, ensure_ascii=False, indent=4)
 
         print("Timestep", i, "/", len(time), "completed")
@@ -3295,10 +2014,12 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
 
 def plotNetwork(time, maxCapacity):
 
+    # time = np.arange(50)
+
     ############################ Plot network ################################
 
     # Load json networkx datafile
-    with open('data/simpleNetwork.json','r') as infile:
+    with open('simpleNetwork.json','r') as infile:
         G = nx.json_graph.node_link_graph(json.load(infile))
     pos = nx.get_node_attributes(G, 'pos')
     print(G)
@@ -3319,7 +2040,7 @@ def plotNetwork(time, maxCapacity):
     # nx.draw_networkx_edge_labels(G, pos, font_size=6, edge_labels={('0', '8'): 'Future',('8', '15'): 'Future',('15', '22'): 'Future',('22', '1'): 'Future'}, font_color='black')
 
     # plt.savefig('figures/simpleNetwork.png', dpi=300)
-    plt.savefig('data/figures/DelftNetwork.png', dpi=300)
+    plt.savefig('figures/DelftNetwork.png', dpi=300)
 
 
 
@@ -3345,37 +2066,71 @@ def plotNetwork(time, maxCapacity):
 
     ############################ Plot agents over time ################################
 
-    for i in time:
+    modeLayers = [60000, 70000, 80000] # [30000, 40000, 50000, 60000, 70000, 80000]
+    modes = ['Bicycle', 'Walk', 'Future'] # ['Car', 'Carpool', 'Transit', 'Bicycle', 'Walk', 'Future']
+    speedModes = [14.621403427954009, 5, 10] # [34.668441679929636, 30.67680672911914, 29.074451916316153, 14.621403427954009, 5, 10] # From ODIN 2019
 
-        with open('data/linksTimeStep' + str(i) + '.json','r') as infile:
-            G = nx.json_graph.node_link_graph(json.load(infile))
-        pos = nx.get_node_attributes(G, 'pos')
+    for c, j in enumerate(modes):
 
-        weights = [G[u][v][0]['nrOfAgents'] for u,v in G.edges()]
+        modeLayer = modeLayers[c]
+        speedMode = speedModes[c]
 
-        weights_norm = [x / maxCapacity / 2 * 10 for x in weights]
-        edge_colors = [-x / maxCapacity / 2 for x in weights]
-        for j in range(len(edge_colors)):
-            if edge_colors[j] > 1:
-                edge_colors[j] = 1
+        checkSpeed = 100
 
-        # Plot the network
-        fig = plt.figure()
-        # nx.draw_networkx_nodes(G, pos)
-        # nx.draw_networkx_labels(G, pos)
-        nx.draw_networkx_edges(G, pos, node_size=0, width=0.2)
-        nx.draw_networkx_edges(G, pos, edge_color=edge_colors, edge_cmap=plt.cm.RdYlGn, node_size=0, arrows=False, width=weights_norm)
-        plt.savefig('data/figures/timestep/networkWithAgents' + str(i) + '.png', dpi=300)
-        plt.close(fig)
-        print("Plotting stills timestep", i, "/", len(time), "completed")
-
-    # Create gif from plots
-    with iio.get_writer('data/figures/networkAgents.gif', duration=0.05) as writer:
         for i in time:
-            file = "data/figures/timestep/networkWithAgents" + str(i) + ".png"
-            image = iio.imread(file)
-            writer.append_data(image)
-            print("Plotting animation timestep", i, "/", len(time), "completed")
+
+            with open('linksTimeStep' + str(i) + '.json','r') as infile:
+                G = nx.json_graph.node_link_graph(json.load(infile))
+            pos = nx.get_node_attributes(G, 'pos')
+
+            weights = [1 - ((G[u][v][0]['nrOfAgents'] * 66 / G[u][v][0]['distance'] / G[u][v][0]['capacity'])) for u,v in G.edges()]
+            speedEdge = [G[u][v][0]['speed']/8 for u,v in G.edges()]
+
+            # Only keep the widths of the relevant edges related to the mode being visualised
+            cntr = 0
+            for u,v in G.edges():
+                if (int(u) < modeLayer) or (int(u) > modeLayer+9999):
+                    speedEdge[cntr] = 0
+                    weights[cntr] = 0
+                if (int(v) < modeLayer) or (int(v) > modeLayer+9999):
+                    speedEdge[cntr] = 0
+                    weights[cntr] = 0
+                cntr += 1
+
+            for k in speedEdge:
+                if (k*8 > 4) and (k*8 < checkSpeed):
+                        checkSpeed = k*8
+
+            # Plot the network
+            fig = plt.figure()
+            nx.draw_networkx_edges(G, pos, edge_color=weights, connectionstyle="arc3,rad=0.1", edge_cmap=plt.cm.RdYlGn, edge_vmin=0, edge_vmax=1, node_size=0, width=speedEdge)
+            plt.savefig('figures/timestep/CapNetworkWithAgents' + j + '_' + str(i) + '.png', dpi=300)
+            plt.close(fig)
+
+            fig = plt.figure()
+            nx.draw_networkx_edges(G, pos, edge_color=speedEdge, connectionstyle="arc3,rad=0.1", edge_cmap=plt.cm.RdYlGn, edge_vmin=0, edge_vmax=1, node_size=0, width=weights*7)
+            plt.savefig('figures/timestep/SpeedNetworkWithAgents' + j + '_' + str(i) + '.png', dpi=300)
+            plt.close(fig)
+
+
+            print("Plotting stills timestep", i, "/", len(time), "completed")
+
+            print('checkSpeed', checkSpeed)
+
+        # Create gif from plots
+        with iio.get_writer('figures/CapNetworkAgents' + j + '.gif', duration=0.05) as writer:
+            for i in time:
+                file = 'figures/timestep/CapNetworkWithAgents' + j + '_' + str(i) + '.png'
+                image = iio.imread(file)
+                writer.append_data(image)
+                print("Plotting animation timestep", i, "/", len(time), "completed")
+
+        with iio.get_writer('figures/SpeedNetworkAgents' + j + '.gif', duration=0.05) as writer:
+            for i in time:
+                file = 'figures/timestep/SpeedNetworkWithAgents' + j + '_' + str(i) + '.png'
+                image = iio.imread(file)
+                writer.append_data(image)
+                print("Plotting animation timestep", i, "/", len(time), "completed")
 
 
 def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scalingSampleSizeTrips, startTime, time, timeStep, runIteration, MNLbeta, MNLmu):
@@ -3387,7 +2142,7 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
     distances = []
 
     # Calculate distance travelled per mode/link
-    with open('data/simpleNetwork.json','r') as infile:
+    with open('simpleNetwork.json','r') as infile:
         G = nx.json_graph.node_link_graph(json.load(infile))
     edges = list(G.edges(data=True))
     edgeDf = []
@@ -3403,7 +2158,7 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
 
     tripsData = pd.DataFrame()
     for i in time:
-        tripsTimeStep = pd.read_pickle('data/tripsTimeStep' + str(i) + '.pkl')
+        tripsTimeStep = pd.read_pickle('tripsTimeStep' + str(i) + '.pkl')
         tripsData = pd.concat([tripsData, tripsTimeStep])
 
     # Add mode and distance to each trip segment
@@ -3419,7 +2174,7 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
     # Save results in archive to prevent overwriting of results
     now = datetime.now() # current date and time
     date_time = now.strftime("%m%d%Y_%H:%M:%S_%f")[:-3]
-    tripsData.to_csv("data/tripsDataAnalyse_" + networkName + '_' + nameFuture + '_' + date_time + ".csv")
+    tripsData.to_csv("tripsDataAnalyse_" + networkName + '_' + nameFuture + '_' + date_time + ".csv")
 
     # tripsData = pd.read_pickle("tripsData.pkl")
     # tripsData = pd.read_csv("tripsDataAnalyse.csv", sep = ',', decimal = '.')
@@ -3583,7 +2338,7 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
 
     for i in time:
         resistance = [0, 0, 0, 0, 0, 0]
-        with open('data/linksTimeStep' + str(i) + '.json','r') as infile:
+        with open('linksTimeStep' + str(i) + '.json','r') as infile:
             G = nx.json_graph.node_link_graph(json.load(infile))
         pos = nx.get_node_attributes(G, 'pos')
         for j in range(6):
@@ -3599,7 +2354,7 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
     tripsModeChoiceMixed = np.array(tripsModeChoiceMixed)
     distances = np.array(distances)
     tripDistRes = np.stack((tripsModeChoice, distances), axis=1)
-    np.savetxt('data/tripDistRes.csv', tripDistRes, delimiter=',')
+    np.savetxt('tripDistRes.csv', tripDistRes, delimiter=',')
 
     print("Modal split: car:", (tripsModeChoice == 1).sum()/len(tripsModeChoice), 
         "carpool:", (tripsModeChoice == 2).sum()/len(tripsModeChoice), 
@@ -3641,11 +2396,11 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
         'modalSplitCarKm', 'modalSplitCarpoolKm', 'modalSplitTransitKm', 'modalSplitBicycleKm', 'modalSplitWalkKm', 'modalSplitFutureKm', 'modalSplitMixedKm', 
         'modalSplitMixedCarKm', 'modalSplitMixedCarpoolKm', 'modalSplitMixedTransitKm', 'modalSplitMixedBicycleKm', 'modalSplitMixedWalkKm', 'modalSplitMixedFutureKm',]
     if runIteration == 0:
-        with open('data/resultsSummary.csv', 'w', encoding='UTF8') as f:
+        with open('resultsSummary.csv', 'w', encoding='UTF8') as f:
             writer = csv.writer(f)
             writer.writerow(header)
 
-    with open('data/resultsSummary.csv', 'a', encoding='UTF8') as f:
+    with open('resultsSummary.csv', 'a', encoding='UTF8') as f:
         writer = csv.writer(f)
         now = datetime.now() # current date and time
         date_time = now.strftime("%m%d%Y_%H:%M:%S_%f")[:-3]
