@@ -160,7 +160,7 @@ def calcResistance(numberOfAgentsOnLink, distance, lanes, ffSpeed, mode, source,
         [-0.0846, -0.4608, 0, 2.11, 2.36, -0.471, -0.755, -1.21, -4.22, -1.34, 0.131, -1.07], # 1
         [-0.12, -0.04566, 0, 0.63, 0.928, 0.0254, -0.143, -0.833, -1.76, 0.0491, -0.195, -0.753], # 2
         [-0.0932, -0.0441, 0, -0.0327, 0.924, 0.486, -1.11, -1.07, 0.395, -1.9, -0.666, -0.248], # 3
-        [-0.196, -0.03036, 0, 0.694, -2.69, -0,959, -0.384, 1.75, -1.65, 1.91, 1.39, 0.848], # 4
+        [-0.196, -0.03036, 0, 0.694, -2.69, -0.959, -0.384, 1.75, -1.65, 1.91, 1.39, 0.848], # 4
         [-0.15, -0.03768, 0, -0.136, 1.29, -0.125, 0.458, -1.16, -2.61, 0.314, 0.455, -1.24]] # 5
 
     # Fundamental diagram, nr of lanes for Delft model based on OmniTRANS Delft model BPR function fitting, see BPR_calibration_all_links.xlsx
@@ -172,13 +172,13 @@ def calcResistance(numberOfAgentsOnLink, distance, lanes, ffSpeed, mode, source,
         else:
             # Fundamental diagram
             critDensity = 25 # [veh/km] Assumed critical density per lane
-            jamDensity = 150 # [veh/km] Assumed maximum density per lane
+            jamDensity = 125 # [veh/km] Assumed maximum density per lane
             laneCapacity = critDensity * ffSpeed # [veh/hr]
             
             if 'Delft' in networkName: # In Delft case lanes == capacity in the input in this function, so below actually reads: capacity / laneCapacity --> lanes
                 lanes = lanes / laneCapacity # [-]
             
-            density = numberOfAgentsOnLink / distance / lanes # [veh/km] - Normalized to 1 lane
+            density = numberOfAgentsOnLink * scalingSampleSize / distance / lanes # [veh/km] - Normalized to 1 lane
 
             if density <= critDensity:
                 speed = ffSpeed # [km/hr]
@@ -303,7 +303,10 @@ def calcResistance(numberOfAgentsOnLink, distance, lanes, ffSpeed, mode, source,
         time = 2 / 60 * 3 # [hour]
 
     elif mode == 'TransitToNeutral':
-        time = 0.1 / 60 * 3 # [hour]
+        if 'Delft' in networkName:
+            time = 0.1 / 60 * 3 # [hour]
+        else:
+            time = 7.5 / 60 * 3 # [hour]
 
     elif mode == 'BicycleToNeutral':
         time = 1 / 60 * 3 # [hour]
@@ -369,7 +372,10 @@ def calcResistance(numberOfAgentsOnLink, distance, lanes, ffSpeed, mode, source,
         time = 10 / 60 * 3 # [hour]
 
     elif mode == 'NeutralToTransit':
-        time = 0.1 / 60 * 3 # [hour]
+        if 'Delft' in networkName:
+            time = 0.1 / 60 * 3 # [hour]
+        else:
+            time = 7.5 / 60 * 3 # [hour]
 
     elif mode == 'NeutralToBicycle':
         time = 1 / 60 * 3 # [hour]
@@ -1175,18 +1181,18 @@ def initializeNetwork(networkName, scalingSampleSizeTrips, seed, depTime):
                     if 'Multimodal' in networkName:
                         for i in zones:
                             # One-way
-                            data = [layerNumber[j]+i, 'link', 0, 0, layerNumber[j]+i, neutralLayerFactor+i, resistance[j], lanes[i], distanceNeutralToMode[j], speed[j], defSpeed[j], mode[j] + 'ToNeutral']
+                            data = [layerNumber[j]+i, 'link', 0, 0, layerNumber[j]+i, neutralLayerFactor+i, resistance[j], 2000, distanceNeutralToMode[j], speed[j], defSpeed[j], mode[j] + 'ToNeutral']
                             writer.writerow(data)
                             # Other-way
-                            data = [layerNumber[j]+i+5000, 'link', 0, 0, neutralLayerFactor+i, layerNumber[j]+i, resistance[j], lanes[i], distanceNeutralToMode[j], speed[j], defSpeed[j], 'NeutralTo' + mode[j]]
+                            data = [layerNumber[j]+i+5000, 'link', 0, 0, neutralLayerFactor+i, layerNumber[j]+i, resistance[j], 2000, distanceNeutralToMode[j], speed[j], defSpeed[j], 'NeutralTo' + mode[j]]
                             writer.writerow(data)
                     else:
                         for i in zonesOD:
                             # One-way
-                            data = [layerNumber[j]+i, 'link', 0, 0, layerNumber[j]+i, 0+i, resistanceToNeutral[j], lanes[i], distanceNeutralToMode[j], speed[j], defSpeed[j], mode[j] + 'ToNeutral']
+                            data = [layerNumber[j]+i, 'link', 0, 0, layerNumber[j]+i, 0+i, resistanceToNeutral[j], 2000, distanceNeutralToMode[j], speed[j], defSpeed[j], mode[j] + 'ToNeutral']
                             writer.writerow(data)
                             # Other-way
-                            data = [layerNumber[j]+i+5000, 'link', 0, 0, 0+i, layerNumber[j]+i, neutralToResistance[j], lanes[i], distanceNeutralToMode[j], speed[j], defSpeed[j], 'NeutralTo' + mode[j]]
+                            data = [layerNumber[j]+i+5000, 'link', 0, 0, 0+i, layerNumber[j]+i, neutralToResistance[j], 2000, distanceNeutralToMode[j], speed[j], defSpeed[j], 'NeutralTo' + mode[j]]
                             writer.writerow(data)
 
                 if 'Multimodal' in networkName:
@@ -3377,9 +3383,9 @@ def plotNetwork(time, maxCapacity):
 
     ############################ Plot agents over time ################################
 
-    modeLayers = [60000, 70000, 80000] # [30000, 40000, 50000, 60000, 70000, 80000]
-    modes = ['Bicycle', 'Walk', 'Future'] # ['Car', 'Carpool', 'Transit', 'Bicycle', 'Walk', 'Future']
-    speedModes = [14.621403427954009, 5, 10] # [34.668441679929636, 30.67680672911914, 29.074451916316153, 14.621403427954009, 5, 10] # From ODIN 2019
+    modeLayers = [30000] # [60000, 70000, 80000] # [30000, 40000, 50000, 60000, 70000, 80000]
+    modes = ['Car'] # []'Bicycle', 'Walk', 'Future'] # ['Car', 'Carpool', 'Transit', 'Bicycle', 'Walk', 'Future']
+    speedModes = [34.668441679929636] # [14.621403427954009, 5, 10] # [34.668441679929636, 30.67680672911914, 29.074451916316153, 14.621403427954009, 5, 10] # From ODIN 2019
 
     for c, j in enumerate(modes):
 
@@ -3387,6 +3393,7 @@ def plotNetwork(time, maxCapacity):
         speedMode = speedModes[c]
 
         checkSpeed = 100
+        checkWeight = 0
 
         for i in time:
 
@@ -3394,7 +3401,11 @@ def plotNetwork(time, maxCapacity):
                 G = nx.json_graph.node_link_graph(json.load(infile))
             pos = nx.get_node_attributes(G, 'pos')
 
-            weights = [1 - ((G[u][v][0]['nrOfAgents'] * 66 / G[u][v][0]['distance'] / G[u][v][0]['capacity'])) for u,v in G.edges()]
+            critDensity = 25 # [veh/km] Assumed critical density per lane
+            jamDensity = 150 # [veh/km] Assumed maximum density per lane
+            laneCapacity = critDensity * speedMode # [veh/hr]           
+
+            weights = [((G[u][v][0]['nrOfAgents'] * 66 / G[u][v][0]['distance'] / G[u][v][0]['capacity'] / jamDensity)) for u,v in G.edges()]
             speedEdge = [G[u][v][0]['speed']/8 for u,v in G.edges()]
 
             # Only keep the widths of the relevant edges related to the mode being visualised
@@ -3412,14 +3423,18 @@ def plotNetwork(time, maxCapacity):
                 if (k*8 > 4) and (k*8 < checkSpeed):
                         checkSpeed = k*8
 
+            for k in weights:
+                if k > checkWeight:
+                    checkWeight = k
+
             # Plot the network
             fig = plt.figure()
-            nx.draw_networkx_edges(G, pos, edge_color=weights, connectionstyle="arc3,rad=0.1", edge_cmap=plt.cm.RdYlGn, edge_vmin=0, edge_vmax=1, node_size=0, width=speedEdge)
+            nx.draw_networkx_edges(G, pos, edge_color=weights, connectionstyle="arc3,rad=0.1", edge_cmap=plt.cm.RdYlGn, edge_vmin=0, edge_vmax=1, node_size=0, width=weights)
             plt.savefig('data/figures/timestep/CapNetworkWithAgents' + j + '_' + str(i) + '.png', dpi=300)
             plt.close(fig)
 
             fig = plt.figure()
-            nx.draw_networkx_edges(G, pos, edge_color=speedEdge, connectionstyle="arc3,rad=0.1", edge_cmap=plt.cm.RdYlGn, edge_vmin=0, edge_vmax=1, node_size=0, width=weights*7)
+            nx.draw_networkx_edges(G, pos, edge_color=speedEdge, connectionstyle="arc3,rad=0.1", edge_cmap=plt.cm.RdYlGn, edge_vmin=0, edge_vmax=1, node_size=0, width=speedEdge)
             plt.savefig('data/figures/timestep/SpeedNetworkWithAgents' + j + '_' + str(i) + '.png', dpi=300)
             plt.close(fig)
 
@@ -3427,6 +3442,7 @@ def plotNetwork(time, maxCapacity):
             print("Plotting stills timestep", i, "/", len(time), "completed")
 
             print('checkSpeed', checkSpeed)
+            print('checkWeight', checkWeight)
 
         # Create gif from plots
         with iio.get_writer('data/figures/CapNetworkAgents' + j + '.gif', duration=0.05) as writer:
@@ -3707,7 +3723,7 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
         'modalSplitCarKm', 'modalSplitCarpoolKm', 'modalSplitTransitKm', 'modalSplitBicycleKm', 'modalSplitWalkKm', 'modalSplitFutureKm', 'modalSplitMixedKm', 
         'modalSplitMixedCarKm', 'modalSplitMixedCarpoolKm', 'modalSplitMixedTransitKm', 'modalSplitMixedBicycleKm', 'modalSplitMixedWalkKm', 'modalSplitMixedFutureKm','averageDistance']
     if runIteration == 0:
-        with open('data/resultsSummary.csv', 'w', encoding='UTF8') as f:
+        with open('data/resultsSummary.csv', 'a', encoding='UTF8') as f:
             writer = csv.writer(f)
             writer.writerow(header)
 
@@ -3737,7 +3753,7 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
             np.sum(totalDistanceTravelled) * scalingSampleSizeTrips, totalUtility, len(tripsModeChoice),
             distancesTrips[0] / factorDistanceCalc, distancesTrips[1] / factorDistanceCalc, distancesTrips[2] / factorDistanceCalc, distancesTrips[3] / factorDistanceCalc, 
             distancesTrips[4] / factorDistanceCalc, distancesTrips[5] / factorDistanceCalc, distancesTrips[6] / factorDistanceCalc, distancesTrips[7] / factorDistanceCalc, 
-            distancesTrips[8] / factorDistanceCalc, distancesTrips[9] / factorDistanceCalc, distancesTrips[10] / factorDistanceCalc, distancesTrips[11] / factorDistanceCalc, distancesTrips[12], 
+            distancesTrips[8] / factorDistanceCalc, distancesTrips[9] / factorDistanceCalc, distancesTrips[10] / factorDistanceCalc, distancesTrips[11] / factorDistanceCalc, distancesTrips[12] / factorDistanceCalc, 
             np.sum(totalDistanceTravelled) * scalingSampleSizeTrips / len(tripsModeChoice)]
         writer.writerow(data)
         f.close()
