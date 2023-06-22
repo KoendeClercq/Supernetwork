@@ -218,7 +218,7 @@ def calcResistance(numberOfAgentsOnLink, distance, lanes, ffSpeed, mode, source,
 
     elif 'Pool' in mode:
 
-        cost = 0.19 / 2 # * distance  # Assumed pick-up and drop, so double the cost - 0.19 / 2 eur/km
+        cost = 0.19 # * distance  # Assumed pick-up and drop, so double the cost - 0.19 / 2 eur/km
         costInitial = 0
         time = distance / speed
         drivingTask = 0
@@ -3094,9 +3094,14 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
             if len(tripsPrev.index) > 0:
                 if len(tripsPrev.index) <= 2*num_processes:
                     num_processes = 1
-                # Calculate chunk size and divide trips into chunks to be iterated through
-                chunk_size = int(len(tripsPrev.index)/(num_processes))
-                chunks = [tripsPrev[n:min(n + chunk_size, tripsPrev.shape[0])] for n in range(0, tripsPrev.shape[0], chunk_size)]
+                    chunks = [tripsPrev]
+                else:
+                    # Calculate chunk size and divide trips into chunks to be iterated through
+                    chunk_size = math.ceil(len(tripsPrev.index)/(num_processes))
+                    chunks = [tripsPrev[n:min(n + chunk_size, tripsPrev.shape[0])] for n in range(0, tripsPrev.shape[0], chunk_size)]
+                    if num_processes != len(chunks):
+                        num_processes = 1
+                        chunks = [tripsPrev]
 
                 # Calculate next positions trips in network for chunks parallel
                 with mp.Pool() as pool:
@@ -3120,8 +3125,11 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
                     chunks = [trips_timeStep]
             else:
                 # Calculate chunk size and divide trips into chunks to be iterated through
-                chunk_size = int(len(trips_timeStep.index)/(num_processes))
+                chunk_size = math.ceil(len(trips_timeStep.index)/(num_processes))
                 chunks = [trips_timeStep[n:min(n + chunk_size, trips_timeStep.shape[0])] for n in range(0, trips_timeStep.shape[0], chunk_size)]
+                if num_processes != len(chunks):
+                    num_processes = 1
+                    chunks = [trips_timeStep]
 
             # Calculate next positions trips in network for chunks parallel
             with mp.Pool() as pool:
