@@ -220,6 +220,7 @@ def calcResistance(numberOfAgentsOnLink, distance, lanes, ffSpeed, mode, source,
 
         cost = 0.19 # * distance  # Assumed pick-up and drop, so double the cost - 0.19 / 2 eur/km
         costInitial = 0
+        speed = min(ffSpeed, speed)
         time = distance / speed
         drivingTask = 0
         skills = 0
@@ -3084,7 +3085,7 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
         shortestPathsList = np.array([0, 0])
 
         # Create as many processes as there are CPUs on your machine
-        num_processes = mp.cpu_count() - 1 # 8 - 1 to account for last chunk if range is not covering all trips exactly
+        num_processes = mp.cpu_count() - 1 # - 1 to account for last chunk if range is not covering all trips exactly
 
         # Initialize trips dictionaries
         trips = []
@@ -3106,8 +3107,8 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
                 # Calculate next positions trips in network for chunks parallel
                 with mp.Pool() as pool:
                     pool = mp.Pool(processes=num_processes)
-                    async_results = [pool.apply_async(calcNextPositions, args=(chunks[m], G, timeStep, networkName, seed, MNLbeta, MNLmu, pos)) for m in range(num_processes)]
-                    results = [ar.get() for ar in async_results]
+                    results = [pool.apply(calcNextPositions, args=(chunks[m], G, timeStep, networkName, seed, MNLbeta, MNLmu, pos)) for m in range(num_processes)]
+                    #results = [ar.get() for ar in async_results]
                     pool.close()
                     pool.join()
 
@@ -3134,8 +3135,8 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
             # Calculate next positions trips in network for chunks parallel
             with mp.Pool() as pool:
                 pool = mp.Pool(processes=num_processes)
-                async_results = [pool.apply_async(calcFirstPositions, args=(chunks[m], G, networkName, seed, MNLbeta, MNLmu, pos)) for m in range(num_processes)]
-                results = [ar.get() for ar in async_results]
+                results = [pool.apply(calcFirstPositions, args=(chunks[m], G, networkName, seed, MNLbeta, MNLmu, pos)) for m in range(num_processes)]
+                #results = [ar.get() for ar in async_results]
                 pool.close()
                 pool.join()
 
@@ -3413,7 +3414,7 @@ def plotNetwork(time, maxCapacity):
             jamDensity = 150 # [veh/km] Assumed maximum density per lane
             laneCapacity = critDensity * speedMode # [veh/hr]           
 
-            weights = [((G[u][v][0]['nrOfAgents'] * 66 / G[u][v][0]['distance'] / G[u][v][0]['capacity'] / jamDensity)) for u,v in G.edges()]
+            weights = [((G[u][v][0]['nrOfAgents'] / G[u][v][0]['distance'] / G[u][v][0]['capacity'] / jamDensity)) for u,v in G.edges()]
             speedEdge = [G[u][v][0]['speed']/8 for u,v in G.edges()]
 
             # Only keep the widths of the relevant edges related to the mode being visualised
