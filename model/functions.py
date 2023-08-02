@@ -118,7 +118,7 @@ def nextNode(G, prevPrevSource, prevSource, recSource, recTarget, cluster, netwo
     denominator = 0
     for p in range(nrOfRoutes):
         try:
-            tempRes = math.exp(V[p])
+            tempRes = max(math.exp(V[p]), 0.0001)
         except:
             tempRes = 1000000
         denominator += tempRes
@@ -132,7 +132,7 @@ def nextNode(G, prevPrevSource, prevSource, recSource, recTarget, cluster, netwo
 
         for r in range(nrOfRoutes):
             try:
-                tempRes = math.exp(V[r])
+                tempRes = max(math.exp(V[r]), 0.0001)
             except:
                 tempRes = 1000000
 
@@ -150,7 +150,7 @@ def nextNode(G, prevPrevSource, prevSource, recSource, recTarget, cluster, netwo
     arrayTemp = [i for i, v in enumerate(P) if v > randValue]
     chosenRoute = arrayTemp[0]
 
-    return pathsList[chosenRoute][1][1]
+    return pathsList[chosenRoute][1][1], V[chosenRoute]
 
 # Resistance (reversed utility) function
 def calcResistance(numberOfAgentsOnLink, distance, lanes, ffSpeed, mode, source, target, currentSpeed, t, timeStep, scalingSampleSize, futureCharRow, networkName):
@@ -185,7 +185,7 @@ def calcResistance(numberOfAgentsOnLink, distance, lanes, ffSpeed, mode, source,
             else:
                 speed = max((jamDensity - density) * (laneCapacity / (jamDensity - critDensity)) / density, 0.1) # [km/hr] - Minimum speed of 0.1 km/hr for computational reasons (otherwise agents might stay in (congested) network forever)
 
-    # speed = max(5, speed)
+    speed = max(5, speed)
 
     # Default values
     cost = 0
@@ -2947,6 +2947,7 @@ def calcFirstPositions(trips_timeStep, G, networkName, seed, MNLbeta, MNLmu, pos
 
     trips = []
     linksCongestion = []
+    utilities = []
 
     for index, row in trips_timeStep.iterrows():
 
@@ -2956,7 +2957,7 @@ def calcFirstPositions(trips_timeStep, G, networkName, seed, MNLbeta, MNLmu, pos
         recSource = str(int(row["origin"]))
         recTarget = str(int(row["destination"]))
         cluster = str(round(row["type"]))
-        nextTarget = nextNode(G, prevPrevSource, prevSource, recSource, recTarget, cluster, networkName, seed, MNLbeta, MNLmu)
+        nextTarget, utilityPath = nextNode(G, prevPrevSource, prevSource, recSource, recTarget, cluster, networkName, seed, MNLbeta, MNLmu)
 
         # Initialize starting point in network
         positionLink = 0
@@ -2987,13 +2988,25 @@ def calcFirstPositions(trips_timeStep, G, networkName, seed, MNLbeta, MNLmu, pos
         }
         linksCongestion.append(dictLinks)
 
-    return [trips, linksCongestion]
+        # Write utility of path in dataset
+        dictUtility = {
+            "recSource": recSource,
+            "recTarget": recTarget,
+            "prevSource": "NAN",
+            "cluster": cluster,
+            "utility": utilityPath,
+        }
+        utilities.append(dictUtility)
+
+    return [trips, linksCongestion, utilities]
 
 
 def calcNextPositions(tripsPrev, G, timeStep, networkName, seed, MNLbeta, MNLmu, pos):
 
     trips = []
     linksCongestion = []
+    utilities = []
+    utilityPath = 0
 
     # Calculate next positions trips in network
     for index, row in tripsPrev.iterrows():
@@ -3025,7 +3038,7 @@ def calcNextPositions(tripsPrev, G, timeStep, networkName, seed, MNLbeta, MNLmu,
                 recSource = str(row["nextTarget"])
                 prevPrevSource = str(row["prevSource"])
                 prevSource = str(row["recSource"])
-                nextTarget = nextNode(G, prevPrevSource, prevSource, recSource, recTarget, cluster, networkName, seed, MNLbeta, MNLmu)
+                nextTarget, utilityPath = nextNode(G, prevPrevSource, prevSource, recSource, recTarget, cluster, networkName, seed, MNLbeta, MNLmu)
             else: # End of route, agent is removed from network
                 continue
 
@@ -3061,7 +3074,17 @@ def calcNextPositions(tripsPrev, G, timeStep, networkName, seed, MNLbeta, MNLmu,
         }
         linksCongestion.append(dictLinks)
 
-    return [trips, linksCongestion]
+        # Write utility of path in dataset
+        dictUtility = {
+            "recSource": recSource,
+            "recTarget": recTarget,
+            "prevSource": prevSource,
+            "cluster": cluster,
+            "utility": utilityPath,
+        }
+        utilities.append(dictUtility)
+
+    return [trips, linksCongestion, dictUtility]
 
 
 def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time, timeStep, networkName, seed, MNLbeta, MNLmu, nameFuture):
@@ -3090,6 +3113,7 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
         # Initialize trips dictionaries
         trips = []
         linksCongestion = []
+        utilities = []
         if i > 0:
             tripsPrev = pd.read_pickle('data/tripsTimeStep' + str(i-1) + '.pkl') # Load trips previous timestep
             if len(tripsPrev.index) > 0:
@@ -3115,8 +3139,11 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
                 for m in range(num_processes):
                     tripsTemp = results[m][0]
                     linksCongestionTemp = results[m][1]
+                    utilitiesTemp = results[m][2]
                     trips.extend(tripsTemp)
                     linksCongestion.extend(linksCongestionTemp)
+                    utilities.extend(utilitiesTemp)
+
             
         # Load new trips in network
         trips_timeStep = newTrips.loc[newTrips["depTime"] == i]
@@ -3143,8 +3170,10 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
             for m in range(num_processes):
                 tripsTemp = results[m][0]
                 linksCongestionTemp = results[m][1]
+                utilitiesTemp = results[m][2]
                 trips.extend(tripsTemp)
                 linksCongestion.extend(linksCongestionTemp)
+                utilities.extend(utilitiesTemp)
 
         # Save all trips with details for current timestep
         CWD = Path(__file__).parent
@@ -3152,6 +3181,12 @@ def simulateNetwork(futureCharRow, links, updateResInt, scalingSampleSize, time,
         os.makedirs(os.path.dirname(filename), exist_ok=True)
         tripsDF = pd.DataFrame.from_dict(trips)
         tripsDF.to_pickle(filename)
+
+        # Save all utility info for current timestep
+        filename = str(CWD) + '/data/utilityTimeStep' + str(i) + '.pkl'
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+        utilitiesDF = pd.DataFrame.from_dict(utilities)
+        utilitiesDF.to_pickle(filename)
 
         # Determine total agents on each link for congestion calculation and write in network
         nodes = list(G.nodes(data=True))
@@ -3491,6 +3526,7 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
     tripsModeChoice = []
     tripsModeChoiceMixed = []
     agentsCluster = [0, 0, 0, 0, 0, 0]
+    clusterTT = [0, 0, 0, 0, 0, 0]
 
     tripsData = pd.DataFrame()
     for i in time:
@@ -3513,7 +3549,7 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
     tripsData.to_csv("data/tripsDataAnalyse_" + networkName + '_' + nameFuture + '_' + date_time + ".csv")
 
     # tripsData = pd.read_pickle("tripsData.pkl")
-    # tripsData = pd.read_csv("tripsDataAnalyse.csv", sep = ',', decimal = '.')
+    # tripsData = pd.read_csv("data/tripsDataAnalyse_1.csv", sep = ',', decimal = '.')
 
     # Extract modes and travel times
     uniqueTrips = tripsData['id'].unique()
@@ -3662,7 +3698,9 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
         # Add to cluster count
         for j in range(6):
             if (int(tripDf['cluster'].iloc[0]) == int(j)):
-                agentsCluster[j] += 1 
+                agentsCluster[j] += 1
+                # Create summed travel time per cluster
+                clusterTT[j] += avTripDuration
         
         if cntr % 100 == 0:
             print("Calculation trip characteristics for trip ", cntr, "/", len(uniqueTrips), "completed")
@@ -3684,6 +3722,8 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
         utilityTimeStep.append(np.sum(resistance))
     totalUtility = np.sum(utilityTimeStep)
 
+    # Calculate average travel time per cluster
+    travelTimePerCluster = np.divide(clusterTT, agentsCluster)
 
     # Print and save all results
     tripsModeChoice = np.array(tripsModeChoice)
@@ -3730,9 +3770,10 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
         'modalSplitMixedCar', 'modalSplitMixedCarpool', 'modalSplitMixedTransit', 'modalSplitMixedBicycle', 'modalSplitMixedWalk', 'modalSplitMixedFuture',
         'averageDuration', 'staDevDuration', 'medianDuration', 'averageSpeed', 'staDevSpeed', 'medianSpeed', 'totalDistanceTravelled', 'totalObservedUtility', 'nrOfTrips',
         'modalSplitCarKm', 'modalSplitCarpoolKm', 'modalSplitTransitKm', 'modalSplitBicycleKm', 'modalSplitWalkKm', 'modalSplitFutureKm', 'modalSplitMixedKm', 
-        'modalSplitMixedCarKm', 'modalSplitMixedCarpoolKm', 'modalSplitMixedTransitKm', 'modalSplitMixedBicycleKm', 'modalSplitMixedWalkKm', 'modalSplitMixedFutureKm','averageDistance']
+        'modalSplitMixedCarKm', 'modalSplitMixedCarpoolKm', 'modalSplitMixedTransitKm', 'modalSplitMixedBicycleKm', 'modalSplitMixedWalkKm', 'modalSplitMixedFutureKm','averageDistance',
+        'ttPerCluster1', 'ttPerCluster2', 'ttPerCluster3', 'ttPerCluster4', 'ttPerCluster5', 'ttPerCluster6']
     if runIteration == 0:
-        with open('data/resultsSummary.csv', 'a', encoding='UTF8') as f:
+        with open('data/resultsSummary.csv', 'w', encoding='UTF8') as f:
             writer = csv.writer(f)
             writer.writerow(header)
 
@@ -3763,23 +3804,75 @@ def statsNetwork(futureCharRow, networkName, nameFuture, scalingSampleSize, scal
             distancesTrips[0] / factorDistanceCalc, distancesTrips[1] / factorDistanceCalc, distancesTrips[2] / factorDistanceCalc, distancesTrips[3] / factorDistanceCalc, 
             distancesTrips[4] / factorDistanceCalc, distancesTrips[5] / factorDistanceCalc, distancesTrips[6] / factorDistanceCalc, distancesTrips[7] / factorDistanceCalc, 
             distancesTrips[8] / factorDistanceCalc, distancesTrips[9] / factorDistanceCalc, distancesTrips[10] / factorDistanceCalc, distancesTrips[11] / factorDistanceCalc, distancesTrips[12] / factorDistanceCalc, 
-            np.sum(totalDistanceTravelled) * scalingSampleSizeTrips / len(tripsModeChoice)]
+            np.sum(totalDistanceTravelled) / len(tripsModeChoice), travelTimePerCluster[0], travelTimePerCluster[1], travelTimePerCluster[2],
+            travelTimePerCluster[3], travelTimePerCluster[4], travelTimePerCluster[5]]
         writer.writerow(data)
         f.close()
+
+    # Compute utilities for each OD-pair per cluster
+    utilityData = pd.DataFrame(columns=['recSource', 'recTarget', 'prevSource', 'cluster', 'utility'])
+    for i in time:
+        utilityTimeStep = pd.read_pickle('data/utilityTimeStep' + str(i) + '.pkl')
+        for index, row in utilityTimeStep.iterrows():
+            if len(row[0]) == 4: # Intended format
+                utilityRow = pd.DataFrame({'recSource': [row[0]], 'recTarget': [row[1]], 'prevSource': [row[2]], 'cluster': [row[3]], 'utility': [row[4]]})
+                utilityData = pd.concat([utilityData, utilityRow])
+            elif len(row[0]) == 5: # Pickle formatted one-layer too deep
+                utilityRow = pd.DataFrame({'recSource': [row[0]['recSource']], 'recTarget': [row[0]['recTarget']], 'prevSource': [row[0]['prevSource']], 'cluster': [row[0]['cluster']], 'utility': [row[0]['utility']]})
+                utilityData = pd.concat([utilityData, utilityRow])
+
+    utilityData = utilityData[utilityData['prevSource'] == "NAN"]
+
+    if 'Delft' not in networkName:
+        zonesOD = [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017, 1018, 1019, 1020, 1021, 1022, 1023, 1024]
+    else:
+        zonesOD = [1001, 1002, 1003, 1004, 1005, 1006, 1007, 2611, 2612, 2613, 2614, 2616, 2622, 2623, 2624, 2625, 2626, 2627, 2628, 2629, 3000]
+
+    utilities = np.zeros((len(zonesOD)*12, len(zonesOD))) # Size csv for total utility per OD-pair per cluster + nrOfAgents per cluster
+    for index, row in utilityData.iterrows():
+
+        # row[0] = recSource
+        # row[1] = recTarget
+        # row[2] = prevSource
+        # row[3] = cluster
+        # row[4] = utility
+
+        # Convert from ODzone name to index
+        if 'Delft' not in networkName:
+            origin = int(row[0][-2:]) - 1
+            destination = int(row[1][-2:]) - 1
+        else:
+
+            if int(row[0]) < 1008:
+                origin = int(row[0][-2:]) - 1
+            elif int(row[0]) < 2615:
+                origin = int(row[0][-2:]) - 4
+            elif int(row[0]) == 2616:
+                origin = int(row[0][-2:]) - 5
+            elif int(row[0]) < 2630:
+                origin = int(row[0][-2:]) - 10
+            else:
+                origin = len(zonesOD) - 1
+
+            if int(row[1]) < 1008:
+                destination = int(row[1][-2:]) - 1
+            elif int(row[1]) < 2615:
+                destination = int(row[1][-2:]) - 4
+            elif int(row[1]) == 2616:
+                destination = int(row[1][-2:]) - 5
+            elif int(row[1]) < 2630:
+                destination = int(row[1][-2:]) - 10
+            else:
+                destination = len(zonesOD) - 1
+
+        cluster = int(row[3])
+        utilities[origin+cluster*len(zonesOD)][destination] += float(row[4])
+        utilities[origin+(6+cluster)*len(zonesOD)][destination] += 1 * scalingSampleSizeTrips
+
+    np.savetxt("data/_" + networkName + '_' + nameFuture + '_cost' + str(futureCharRow[0]) + '_speed' + str(futureCharRow[1]) + '_avail' + str(futureCharRow[7]) + '_nTm' + str(futureCharRow[11]) + '_mtn' + str(futureCharRow[12]) + date_time + ".csv", utilities, delimiter=",")
 
     print("Finished running one iteration of the simulation. Duration %s seconds" % round((timeOS.time() - startTime), 4))
     runIteration += 1
     return runIteration
-
-
-
-
-
-
-
-
-
-
-
 
 
